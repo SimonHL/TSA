@@ -22,70 +22,108 @@ import sys,time
 import numpy
 import theano
 import theano.tensor as T
+import matplotlib.pyplot as plt
 
-def step(x,h, W_in, W_r, W_out):
-    total = T.dot(W_in,x) + T.dot(W_r,h)
+def step(*args):
+    #global n_input, n_hidden 
+    print args
+    x =  [args[u] for u in xrange(n_input)] 
+    hid_taps = args[n_input]  
     
-    return T.tanh(total)
+    W_in =  [args[u] for u in xrange(n_input + 1, n_input * 2 + 1)]
+    b_in = args[n_input * 2 + 1]
+    W_hid = args[n_input * 2 + 2]
     
-def purelin(h, W_out):
-    y = T.dot(h,W_out)
-    return y
+    
+    h = T.dot(x[0], W_in[0]) + b_in
+    for j in xrange(1, n_input):              # 前向部分
+        h = h +  T.dot(x[j], W_in[j]) + b_in
+    
+    h = h + T.dot(hid_taps, W_hid)            # 回归部分
+
+        
+    return T.tanh(h)
+    
+def purelin(*args):
+    print args
+    h = args[0]
+    W_in =  [args[u] for u in xrange(1, n_input + 1)]
+    b_in = args[n_input + 1]
+    W_hid = args[n_input + 2]
+    W_in
+    b_in
+    W_hid
+    W_out = args[n_input + 3]
+    b_out = args[n_input + 4]
+
+    y = T.dot(h,W_out) + b_out
+    return T.tanh(y)
     
 # 设置网络参数
-learning_rate = 0.01             
-n_input = 10
+learning_rate = 0.001
+n_input = 4
 n_hidden = 10
 n_output = 1
-N = 1000
-n_epochs = 10
+N = 400
+n_epochs = 1000
 
 dtype=theano.config.floatX
 
 # 加要处理的数据
 data = numpy.genfromtxt("mytestdata.txt")
+sampleNum = 400-n_input
+index = range(sampleNum)
+data_x = data[:,0]
+data_y = data[:,1]
 
-#y = data[:,0]
-#y = y.T
-#t = data[:,1]
-#t = t.T
+print data_x.shape, data_y.shape
 
-print 'network: n_in:{},n_hidden:{},n_out:{},output:softmax'.format(n_input, n_hidden, n_output)
+
+print 'network: n_in:{},n_hidden:{},n_out:{}'.format(n_input, n_hidden, n_output)
 
 # 构造网络
-x_in = T.matrix()   # 输入向量,第1维是时间
+x_in = T.vector()   # 输入向量,第1维是时间
 y_out = T.vector()  # 输出向量
-H = T.matrix()      # 隐层单元状态,用来输入初始值
 lr = T.scalar()     # 学习速率，标量
 
-h_init = numpy.zeros((n_hidden,n_hidden )).astype(dtype) # 网络隐层状态
+H = T.matrix()      # 隐单元的初始化值
+    
 
-W_in  = theano.shared(numpy.random.uniform(size=(n_input,n_hidden),low=-0.01,high=0.01).astype(dtype),name="W_in")
-W_r   = theano.shared(numpy.random.uniform(size=(n_hidden,n_hidden),low=-0.01,high=0.01).astype(dtype),name="W_r")
+h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
+
+W_in = [theano.shared(numpy.random.uniform(size=(1, n_hidden), low= -0.01, high=0.01).astype(dtype), 
+                      name='W_in' + str(u)) for u in range(n_input)]                
+b_in = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name="b_in")
+
+W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, n_hidden), low= -0.01, high=0.01).astype(dtype), name='W_hid') 
+
 W_out = theano.shared(numpy.random.uniform(size=(n_hidden,n_output),low=-0.01,high=0.01).astype(dtype),name="W_out")
+b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
 
 params = []
-params.extend([W_in])
-params.extend([W_r])
-params.extend([W_out])
+params.extend(W_in)
+params.extend([b_in])
+params.extend([W_hid])
 
+input_taps = range(1-n_input, 1)
+output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
-                        sequences=x_in,
-                        outputs_info=dict(initial=H, taps=[-1]),  # 从输出值中延时-1抽取
+                        sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
+                        outputs_info=dict(initial = H, taps=output_taps),
                         non_sequences=params)
-                                               
-y = T.sum(T.dot(h_tmp, W_out),0)
-                                                                                            
-#cost = ((y_out - y.reshape(y_out.shape[0])) ** 2).sum()  
-                         
-#cost =  1/2 * T.sqrt( T.sum(( T.pow(y_out,2) - T.pow(y,2))))
-
-#cost = -T.mean(T.log(y)[T.arange(y_out.shape[0]), 0]) 
-
-cost = ((y_out-y)**2).sum()
+params.extend([W_out])
+params.extend([b_out])                        
+y,updates = theano.scan(purelin,
+                        sequences=h_tmp,
+                        non_sequences=params)
+y = T.flatten(y)                             
+                        
+                        
+cost = ((y_out[n_input-1:,]-y)**2).sum()
 
 
 # 编译表达式
+
 gparams = []
 for param in params:
     gparam = T.grad(cost, param)
@@ -96,29 +134,37 @@ updates = []
 for param, gparam in zip(params, gparams):
     updates.append((param, param - lr * gparam))
     
-print updates
-
 # define the train function
-learning_rate = 0.01    
 train_fn = theano.function([x_in, y_out],                             
                      outputs=cost,
                      updates=updates,
-                     givens=[(H,T.cast(h_init, 'floatX')),   #设置网络初值 
-                            (lr,T.cast(learning_rate, 'floatX'))])
-
-# 数据输入,训练
-data_x = numpy.random.uniform(size=(N,n_input)).astype(theano.config.floatX)
-data_y = numpy.random.uniform(size=(N,)).astype(theano.config.floatX)
+                     givens=[(lr,T.cast(learning_rate, 'floatX')),
+                             (H, h_init)])                      
+                             
+                                         
+sim_fn = theano.function([x_in],                             
+                     outputs=y,
+                     givens=[(lr,T.cast(learning_rate, 'floatX')),
+                             (H, h_init)])
 
 print 'Running ({} epochs)'.format(n_epochs)        
 start_time = time.clock()     
+
 for epochs_index in xrange(n_epochs) :             
     print train_fn(data_x, data_y)
-    print 'Training {}'.format(epochs_index)   
+    print 'Training {}'.format(epochs_index) 
+  
+y_sim = sim_fn(data_x)  
+print y_sim.shape
+print b_in.get_value() 
+
+plt.plot(range(y_sim.shape[0]), y_sim, 'r')
+plt.plot(range(data_x.shape[0]), data_x,'b')
+plt.plot(range(data_y.shape[0]), data_y,'k')
                           
 print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.))
 
-# 绘图
+print h_init.get_value()   
 
          
 print "finished!"
