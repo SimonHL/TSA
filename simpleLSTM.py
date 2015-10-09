@@ -1,8 +1,11 @@
+# -*- coding: utf-8 -*-
+
 from collections import OrderedDict
 import numpy
 import theano
 import theano.tensor as T
 import time
+import sys
 import matplotlib.pyplot as plt
 
 SEED = 123
@@ -282,29 +285,11 @@ def train_lstm(
     
     f_grad = theano.function([x, y], grads, name='f_grad')
     
-   
-    #print 'f_pred=', f_pred(data_x) 
-#    print 'f_cost=', f_cost(data_x,data_y) 
-#    print 'f_grad=', f_grad(data_x,data_y)    
-#    return
-    
-    #theano.printing.debugprint(f_cost)
 
     lr = theano.tensor.scalar(name='lr')
     updates_1, updates_2, f_grad_shared, f_update = optimizer(lr, tparams, grads, x, y, cost)
-    
-    
-    for update in updates_1:
-        print 'name=',update
-        print 'D=', update[0].get_value()
-        print 'S=', update[1]
-        
-       
-    
-    start_time = time.clock()  
-    
-#    for k, p in tparams.iteritems():
-#                print '%s:' %k,  p.get_value()[0] 
+
+    start_time = time.time()
 
     for epochs_index in xrange(max_epochs) :  
      
@@ -316,11 +301,18 @@ def train_lstm(
 #                print '%s:' %k,  p.get_value()[0] 
 
     
-    y_sim = f_pred(data_x)  
+    y_sim = f_pred(data_x) 
+
+    end_time = time.time()
+
+    print >> sys.stderr, ('Training took %.1fs' %
+                      (end_time - start_time)) 
     
     plt.plot(range(y_sim.shape[0]), y_sim, 'r')
 #    plt.plot(range(data_x.shape[0]), data_x,'b')
 #    plt.plot(range(data_y.shape[0]), data_y,'k')
+
+    plt.show()
     
     
     print "end"
@@ -328,7 +320,7 @@ def train_lstm(
 
 if __name__ == '__main__':
     train_lstm(
-        max_epochs=1000,
+        max_epochs=200,
         test_size=500,
     )
 
