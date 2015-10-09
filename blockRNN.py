@@ -2,19 +2,7 @@
 """
 Created on Thu Aug 27 16:22:26 2015
 使用Elman网络（简单局部回归网络）
-
-load phoneme
-p = con2seq(y);
-t = con2seq(t);
-lrn_net = newlrn(p,t,8);
-lrn_net.trainFcn = 'trainbr';
-lrn_net.trainParam.show = 5;
-lrn_net.trainParam.epochs = 50;
-lrn_net = train(lrn_net,p,t);
-
-y = sim(lrn_net,p);
-plot(cell2mat(y));
-
+以分块矩阵的形式组织网络
 
 @author: simon
 """
@@ -29,35 +17,73 @@ def numpy_floatX(data):
     return numpy.asarray(data, dtype=theano.config.floatX)
 
 def step(*args):
-    #global n_input, n_hidden 
+    #global n_input, n_hidden
     print args
+    current_index = 0; 
     x =  [args[u] for u in xrange(n_input)] 
-    hid_taps = args[n_input]  
-    
-    W_in =  [args[u] for u in xrange(n_input + 1, n_input * 2 + 1)]
-    b_in = args[n_input * 2 + 1]
-    W_hid = args[n_input * 2 + 2]
-    
-    
-    h = T.dot(x[0], W_in[0]) + b_in
-    for j in xrange(1, n_input):              # 前向部分
-        h = h +  T.dot(x[j], W_in[j]) + b_in
-    
-    h = h + T.dot(hid_taps, W_hid)            # 回归部分
+    current_index += n_input
 
-        
-    return T.tanh(h)
+    hid_taps = [args[u] for u in xrange(current_index, current_index + n_segment_h)]
+    current_index += n_segment_h  
+    
+    W_in =  [args[u] for u in xrange(current_index, current_index + n_segment_x * n_segment_h)]
+    current_index += n_segment_x * n_segment_h
+
+    b_in = [args[u] for u in xrange(current_index, current_index + n_segment_h)]
+    current_index += n_segment_h
+
+    W_hid = [args[u] for u in xrange(current_index, current_index + n_segment_h ** 2)]
+
+    # 构造符合要求的分块的x
+    x_perblock = n_input/n_segment_x
+    x_block = []
+    for i in xrange(n_segment_x):
+        x_tmp = []
+        for j in xrange(x_perblock):
+            x_tmp.extend([x[i*x_perblock + j]])
+        theano.tensor.stack(x_tmp)    
+        x_block.extend([x_tmp])
+    
+    # 前向部分
+    h_list = []
+
+    for i in xrange(n_segment_h):
+        h_tmp = T.dot(W_in[i*n_segment_x + 0], x_block[0])
+        for j in xrange(1,n_segment_x):
+            h_tmp += T.dot(W_in[i*n_segment_x + j], x_block[j])
+        h_tmp = h_tmp + b_in[i]
+        h_list.extend([h_tmp])
+
+    # 回归部分
+    h_list_r = []
+    for i in xrange(n_segment_h):
+        h_tmp = T.dot(W_hid[i*n_segment_h + 0],hid_taps[0])
+        for j in xrange(1,n_segment_h):
+            h_tmp += T.dot(W_hid[i*n_segment_h + j],hid_taps[j])
+
+        h_list_r.extend([h_tmp])
+        h_list[i] += h_list_r[i]   # sum
+
+    return [T.tanh(h_list[i]) for i in xrange(n_segment_h)]
     
 def purelin(*args):
     print args
-    h = args[0]
-    W_in =  [args[u] for u in xrange(1, n_input + 1)]
-    b_in = args[n_input + 1]
-    W_hid = args[n_input + 2]
-    W_out = args[n_input + 3]
-    b_out = args[n_input + 4]
+    current_index = 0
+    h = [args[u] for u in xrange(current_index, current_index + n_segment_h)]
+    current_index += n_segment_h
 
-    y = T.dot(h,W_out) + b_out
+    W_out = [args[u] for u in xrange(current_index, current_index + n_segment_h)]
+    current_index += n_segment_h
+
+    b_out = [args[u] for u in xrange(current_index, current_index +n_segment_h)]
+    current_index += n_segment_h
+
+    print W_out, b_out
+
+    y = T.dot(W_out[0], h[0]) + b_out[0]
+    for j in xrange(1,n_segment_h):
+        y += T.dot(W_out[j],h[j]) + b_out[j]
+
     return T.tanh(y)
 
 def adadelta(lr, tparams, grads, x, y, cost):
@@ -127,8 +153,10 @@ def adadelta(lr, tparams, grads, x, y, cost):
     return updates_1, updates_2,f_grad_shared, f_update    
     
 # 设置网络参数
-n_input = 4 
-n_hidden = 8
+n_input = 4
+n_hidden = 10
+n_segment_h = 2   # 隐层单元进行分块的块数，需保证整除
+n_segment_x = 2   # 输入进行分块的块数，需保证整除
 n_output = 1
 N = 400
 n_epochs = 500
@@ -144,31 +172,33 @@ index = range(sampleNum)
 data_x = data[:,0]
 data_y = data[:,1]
 
-print data_x.shape, data_y.shape
-
-
-print 'network: n_in:{},n_hidden:{},n_out:{}'.format(n_input, n_hidden, n_output)
-
 # 构造网络
 x_in = T.vector()   # 输入向量,第1维是时间
 y_out = T.vector()  # 输出向量
     
 
-h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
+h_init = [theano.shared(numpy.zeros((n_hidden/n_segment_h,), dtype=dtype), 
+          name='h_init'+ str(u)) for u in range(n_segment_h)] 
 
-W_in = [theano.shared(numpy.random.uniform(size=(1, n_hidden), low= -0.01, high=0.01).astype(dtype), 
-                      name='W_in' + str(u)) for u in range(n_input)]                
-b_in = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name="b_in")
-
-W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, n_hidden), low= -0.01, high=0.01).astype(dtype), name='W_hid') 
-
-W_out = theano.shared(numpy.random.uniform(size=(n_hidden,n_output),low=-0.01,high=0.01).astype(dtype),name="W_out")
-b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
+# 生成系数矩阵
+W_in = [theano.shared(numpy.random.uniform(size=(n_hidden/n_segment_h, n_input/n_segment_x), 
+                      low= -0.01, high=0.01).astype(dtype), 
+                      name='W_in' + str(u)) for u in range(n_segment_h * n_segment_x)]                
+b_in = [theano.shared(numpy.zeros((n_hidden/n_segment_h,), dtype=dtype), 
+                      name="b_in" + str(u)) for u in range(n_segment_h)]
+W_hid = [theano.shared(numpy.random.uniform(size=(n_hidden/n_segment_h, n_hidden/n_segment_h), 
+                        low= -0.01, high=0.01).astype(dtype), 
+                        name='W_hid'+ str(u)) for u in range(n_segment_h * n_segment_h)] 
+W_out = [theano.shared(numpy.random.uniform(size=(n_output,n_hidden/n_segment_h),
+                       low=-0.01,high=0.01).astype(dtype),
+                       name="W_out"+ str(u)) for u in range(n_segment_h)]
+b_out = [theano.shared(numpy.zeros((n_output,), dtype=dtype),
+                       name="b_out"+ str(u)) for u in range(n_segment_h)]
 
 params = []
 params.extend(W_in)
-params.extend([b_in])
-params.extend([W_hid])
+params.extend(b_in)
+params.extend(W_hid)
 
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
@@ -176,11 +206,16 @@ h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
                         sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
                         outputs_info=h_init,   # taps = [-1], default
                         non_sequences=params)
-params.extend([W_out])   
-params.extend([b_out])                        
+
+params.extend(W_out)   
+params.extend(b_out)  
+
+params_1 = []
+params_1.extend(W_out)   
+params_1.extend(b_out)                        
 y,updates = theano.scan(purelin,
                         sequences=h_tmp,
-                        non_sequences=params)
+                        non_sequences=params_1)
 y = T.flatten(y)                    
                         
 cost = ((y_out[n_input-1:,]-y)**2).sum()
@@ -207,7 +242,6 @@ for epochs_index in xrange(n_epochs) :
 y_sim = f_pred(data_x) 
 
 print y_sim.shape
-print b_in.get_value() 
 
 plt.plot(range(y_sim.shape[0]), y_sim, 'r')
 plt.plot(range(data_x.shape[0]), data_x,'b')
@@ -218,3 +252,4 @@ print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.
 print "finished!"
 
 plt.show()
+
