@@ -23,6 +23,9 @@ def step(*args):
     x =  [args[u] for u in xrange(n_input)] 
     current_index += n_input
 
+    x_mask = args[current_index]
+    current_index += 1
+
     hid_taps = [args[u] for u in xrange(current_index, current_index + n_segment_h)]
     current_index += n_segment_h  
     
@@ -58,11 +61,13 @@ def step(*args):
     h_list_r = []
     for i in xrange(n_segment_h):
         h_tmp = T.dot(W_hid[i*n_segment_h + 0],hid_taps[0])
-        for j in xrange(i,n_segment_h):
+        for j in xrange(i,n_segment_h):  # 下标从i开始，可以使其成为上三角矩阵
             h_tmp += T.dot(W_hid[i*n_segment_h + j],hid_taps[j])
-
         h_list_r.extend([h_tmp])
         h_list[i] += h_list_r[i]   # sum
+
+    for i in xrange(n_segment_h):
+        h_list[i] = theano.tensor.switch(x_mask[i],h_list[i], hid_taps[i])
 
     return [T.tanh(h_list[i]) for i in xrange(n_segment_h)]
     
@@ -86,7 +91,7 @@ def purelin(*args):
 
     return T.tanh(y)
 
-def adadelta(lr, tparams, grads, x, y, cost):
+def adadelta(lr, tparams, grads, x, x_mask, y, cost):
     """
     An adaptive learning rate optimizer
 
@@ -131,7 +136,7 @@ def adadelta(lr, tparams, grads, x, y, cost):
                  
     updates_1 = zgup + rg2up
 
-    f_grad_shared = theano.function([x, y], cost, updates=updates_1,
+    f_grad_shared = theano.function([x, x_mask, y], cost, updates=updates_1,
                                     name='adadelta_f_grad_shared',
                                     mode='FAST_COMPILE')
 
@@ -153,10 +158,10 @@ def adadelta(lr, tparams, grads, x, y, cost):
     return updates_1, updates_2,f_grad_shared, f_update    
     
 # 设置网络参数
-n_input = 6
-n_hidden = 10
-n_segment_h = 2   # 隐层单元进行分块的块数，需保证整除
-n_segment_x = 2   # 输入进行分块的块数，需保证整除
+n_input = 15
+n_hidden = 15
+n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
+n_segment_x = 1   # 输入进行分块的块数，需保证整除
 n_output = 1
 N = 400
 n_epochs = 500
@@ -173,9 +178,21 @@ data_x = data[:,0]
 data_y = data[:,1]
 
 data_x = numpy.zeros_like(data_x)
+data_y = numpy.sin(8 * numpy.pi * numpy.linspace(0,1,400))
+
+data_mask = numpy.zeros((sampleNum,n_segment_h), dtype=numpy.bool)
+
+for t in xrange(sampleNum):
+    for e in xrange(n_segment_h):
+        if t % 2**e == 0:
+            data_mask[t,e] = 1
+
+print 'data_mask:', data_mask.shape
+print data_mask
 
 # 构造网络
 x_in = T.vector()   # 输入向量,第1维是时间
+x_mask = T.matrix()
 y_out = T.vector()  # 输出向量
     
 
@@ -183,16 +200,17 @@ h_init = [theano.shared(numpy.zeros((n_hidden/n_segment_h,), dtype=dtype),
           name='h_init'+ str(u)) for u in range(n_segment_h)] 
 
 # 生成系数矩阵
-W_in = [theano.shared(numpy.random.uniform(size=(n_hidden/n_segment_h, n_input/n_segment_x), 
-                      low= -0.01, high=0.01).astype(dtype), 
+mu,sigma = 0.0, 0.1
+numpy.random.normal(loc=mu, scale=sigma, size=(n_hidden/n_segment_h, n_input/n_segment_x))
+W_in = [theano.shared(numpy.random.normal(loc=mu, scale=sigma, size=(n_hidden/n_segment_h, n_input/n_segment_x)).astype(dtype), 
                       name='W_in' + str(u)) for u in range(n_segment_h * n_segment_x)]                
 b_in = [theano.shared(numpy.zeros((n_hidden/n_segment_h,), dtype=dtype), 
                       name="b_in" + str(u)) for u in range(n_segment_h)]
-W_hid = [theano.shared(numpy.random.uniform(size=(n_hidden/n_segment_h, n_hidden/n_segment_h), 
-                        low= -0.01, high=0.01).astype(dtype), 
+W_hid = [theano.shared(numpy.random.normal(size=(n_hidden/n_segment_h, n_hidden/n_segment_h), 
+                        loc=mu, scale=sigma).astype(dtype), 
                         name='W_hid'+ str(u)) for u in range(n_segment_h * n_segment_h)] 
-W_out = [theano.shared(numpy.random.uniform(size=(n_output,n_hidden/n_segment_h),
-                       low=-0.01,high=0.01).astype(dtype),
+W_out = [theano.shared(numpy.random.normal(size=(n_output,n_hidden/n_segment_h),
+                       loc=mu, scale=sigma).astype(dtype),
                        name="W_out"+ str(u)) for u in range(n_segment_h)]
 b_out = [theano.shared(numpy.zeros((n_output,), dtype=dtype),
                        name="b_out"+ str(u)) for u in range(n_segment_h)]
@@ -205,7 +223,7 @@ params.extend(W_hid)
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
-                        sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
+                        sequences=[dict(input=x_in, taps=input_taps), x_mask],  # 从输出值中延时-1抽取
                         outputs_info=h_init,   # taps = [-1], default
                         non_sequences=params)
 
@@ -220,7 +238,7 @@ y,updates = theano.scan(purelin,
                         non_sequences=params_1)
 y = T.flatten(y)                    
                         
-cost = ((y_out[n_input-1:,]-y)**2).sum()
+cost = ((y_out[n_input:,]-y)**2).sum()
 
 params4grad = []
 
@@ -231,34 +249,34 @@ for i in xrange(n_segment_h):
     for j in xrange(i,n_segment_h):
         params4grad.extend([W_hid[i*n_segment_h+j]])
 
-params.extend(W_out)   
-params.extend(b_out)  
-
+params4grad.extend(W_out)   
+params4grad.extend(b_out)
 
 # 编译表达式
-grads = theano.tensor.grad(cost, wrt=params)
+grads = theano.tensor.grad(cost, wrt=params4grad)
 tparams = OrderedDict()
-for p in params:
+for p in params4grad:
     tparams[p.name] = p   
 
 lr_v = 0.0001
 lr_ada = theano.tensor.scalar(name='lr_ada')
 
-f_pred = theano.function([x_in],                             
+f_pred = theano.function([x_in, x_mask],                             
                          outputs=y)  
 
-updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, y_out, cost)
+updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, x_mask, y_out, cost)
 
+print 'data info:', data_x.shape, data_y.shape
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  
-        print 'cost = {}: {}'.format(epochs_index, f_grad_shared(data_x, data_y))
+        print 'cost = {}: {}'.format(epochs_index, f_grad_shared(data_x, data_mask, data_y))
         f_update(lr_v)
     
-y_sim = f_pred(data_x) 
+y_sim = f_pred(data_x, data_mask) 
 
 print y_sim.shape
 
-plt.plot(range(y_sim.shape[0]), y_sim, 'r')
+plt.plot(range(data_y.shape[0]-y_sim.shape[0],data_y.shape[0]), y_sim, 'r')
 plt.plot(range(data_x.shape[0]), data_x,'b')
 plt.plot(range(data_y.shape[0]), data_y,'k')
                           

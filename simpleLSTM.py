@@ -21,7 +21,7 @@ def ortho_weight(ndim):
     '''
     做奇异值分解，返回特征向量矩阵U
     '''
-    W = numpy.random.randn(ndim, ndim)
+    W = 0.1 * numpy.random.randn(ndim, ndim)
     u, s, v = numpy.linalg.svd(W)
     return u.astype(theano.config.floatX)
 
@@ -45,6 +45,7 @@ def param_init_lstm(options, params, prefix='lstm'):
                            ortho_weight(options['dim_proj'])], axis=1)
     params[_p(prefix, 'U')] = U
     b = numpy.zeros((4 * options['dim_proj'],))  # (4*dim)
+    b[options['dim_proj']: 2 * options['dim_proj']] = 5
     params[_p(prefix, 'b')] = b.astype(theano.config.floatX)
 
     return params
@@ -61,7 +62,7 @@ def init_params(options):
                               params,
                               prefix=options['encoder'])
     # 输出层的系数
-    params['U'] = 0.01 * numpy.random.randn(options['dim_proj'],
+    params['U'] = 0.1 * numpy.random.randn(options['dim_proj'],
                                             options['ydim']).astype(theano.config.floatX)
     params['b'] = numpy.zeros((options['ydim'],)).astype(theano.config.floatX)
 
@@ -221,9 +222,9 @@ def adadelta(lr, tparams, grads, x, y, cost):
     return updates_1, updates_2,f_grad_shared, f_update
 
 def train_lstm(
-    dim_proj=5,  # 输入x的个数和LSTM单元个数相等 
+    dim_proj=40,  # 输入x的个数和LSTM单元个数相等 
     patience=10,  # Number of epoch to wait before early stop if no progress
-    max_epochs=1000,  # The maximum number of epoch to run
+    max_epochs=1500,  # The maximum number of epoch to run
     dispFreq=10,  # Display to stdout the training progress every N updates
     decay_c=0.,  # Weight decay for the classifier applied to the U weights.
     lrate=0.0001,  # Learning rate for sgd (not used for adadelta and rmsprop)
@@ -258,10 +259,12 @@ def train_lstm(
     index = range(sampleNum)
     data_x = numpy.zeros((sampleNum,n_input))
     data_y = numpy.zeros((sampleNum,))
+
     for i in index:
-        data_x[i,:] = data[i:i + n_input , 0]
+        #data_x[i,:] = data[i:i + n_input , 0]
         data_y[i] = data[i + n_input, 1]
     
+    data_y = numpy.sin(8 * numpy.pi * numpy.linspace(0,1,sampleNum))
     ydim = 1
 
     model_options['ydim'] = ydim
@@ -292,8 +295,7 @@ def train_lstm(
     start_time = time.time()
 
     for epochs_index in xrange(max_epochs) :  
-     
-        print 'cost = : ', f_grad_shared(data_x, data_y)
+        print 'cost = {}: {}'.format(epochs_index, f_grad_shared(data_x, data_y))
         f_update(lrate)
     # print 'Training {}'.format(epochs_index) 
     
@@ -320,7 +322,6 @@ def train_lstm(
 
 if __name__ == '__main__':
     train_lstm(
-        max_epochs=200,
         test_size=500,
     )
 

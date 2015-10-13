@@ -61,8 +61,8 @@ def purelin(*args):
     
 # 设置网络参数
 learning_rate = 0.001
-n_input = 4
-n_hidden = 10
+n_input = 10
+n_hidden = 30
 n_output = 1
 N = 400
 n_epochs = 1000
@@ -77,6 +77,8 @@ data_x = data[:,0]
 data_y = data[:,1]
 
 print data_x.shape, data_y.shape
+
+data_x = numpy.zeros_like(data_x)
 
 
 print 'network: n_in:{},n_hidden:{},n_out:{}'.format(n_input, n_hidden, n_output)
