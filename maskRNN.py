@@ -178,7 +178,7 @@ data_x = data[:,0]
 data_y = data[:,1]
 
 data_x = numpy.zeros_like(data_x)
-data_y = numpy.sin(8 * numpy.pi * numpy.linspace(0,1,400))
+data_y = 1.0 * numpy.sin(30 * numpy.pi * numpy.linspace(0,1,400))
 
 data_mask = numpy.zeros((sampleNum,n_segment_h), dtype=numpy.bool)
 

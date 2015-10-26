@@ -173,6 +173,7 @@ data_x = data[:,0]
 data_y = data[:,1]
 
 data_x = numpy.zeros_like(data_x)
+data_y = numpy.sin(8 * numpy.pi * numpy.linspace(0,1,400))
 
 # 构造网络
 x_in = T.vector()   # 输入向量,第1维是时间
