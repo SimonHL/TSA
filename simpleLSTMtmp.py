@@ -477,7 +477,6 @@ def train_lstm(
     print 'Loading data'
     train, valid, test = load_data(n_words=n_words, valid_portion=0.05,
                                    maxlen=maxlen)
-    
     if test_size > 0:
         # The test set is sorted by size, but we want to keep random
         # size example.  So we must select a random selection of the
@@ -528,7 +527,6 @@ def train_lstm(
 
     kf_valid = get_minibatches_idx(len(valid[0]), valid_batch_size)
     kf_test = get_minibatches_idx(len(test[0]), valid_batch_size)
-    
 
     print "%d train examples" % len(train[0])
     print "%d valid examples" % len(valid[0])
@@ -566,17 +564,9 @@ def train_lstm(
                 # Return something of shape (minibatch maxlen, n samples)
                 x, mask, y = prepare_data(x, y)
                 n_samples += x.shape[1]
-                
-                for k, p in tparams.iteritems():
-                    print '%s:' %k,  p.get_value()[0]
 
                 cost = f_grad_shared(x, mask, y)
                 f_update(lrate)
-                
-                for k, p in tparams.iteritems():
-                    print '%s:' %k,  p.get_value()[0]
-                
-                break
 
                 if numpy.isnan(cost) or numpy.isinf(cost):
                     print 'NaN detected'
@@ -659,6 +649,6 @@ def train_lstm(
 if __name__ == '__main__':
     # See function train for all possible parameter and there definition.
     train_lstm(
-        max_epochs=1,
+        max_epochs=100,
         test_size=500,
     )

@@ -60,7 +60,7 @@ def step(*args):
 
     for i in xrange(n_segment_h):
         h_tmp = T.dot(W_in[i*n_segment_x + 0], x_block[0])
-        for j in xrange(i,n_segment_x):
+        for j in xrange(1,n_segment_x):
             h_tmp += T.dot(W_in[i*n_segment_x + j], x_block[j])
         h_tmp = h_tmp + b_in[i]
         h_list.extend([h_tmp])
@@ -192,7 +192,7 @@ def  gen_random_mask(sampleNum,n_segment_h):
 n_input = 15
 n_hidden = 15
 n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
-n_segment_x = 5   # 输入进行分块的块数，需保证整除
+n_segment_x = 3   # 输入进行分块的块数，需保证整除
 n_output = 1
 
 n_epochs = 1000
@@ -264,10 +264,7 @@ cost = ((y_out[n_input:,]-y)**2).sum()
 
 params4grad = []
 
-# params4grad.extend(W_in)
-for i in xrange(n_segment_h):
-    for j in xrange(i,n_segment_x):
-        params4grad.extend([W_in[i*n_segment_h+j]])
+params4grad.extend(W_in)
 params4grad.extend(b_in)
 #params4grad.extend(W_hid)   #左下部分不参与计算
 for i in xrange(n_segment_h):
