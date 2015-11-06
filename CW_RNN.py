@@ -17,6 +17,7 @@ import utilities.datagenerator as DG
 
 # compile_mode = 'FAST_COMPILE'
 compile_mode = 'FAST_RUN'
+
 # Set the random number generators' seeds for consistency
 SEED = 100
 numpy.random.seed(SEED)
@@ -68,8 +69,8 @@ def step(*args):
     # 回归部分
     h_list_r = []
     for i in xrange(n_segment_h):
-        h_tmp = T.dot(W_hid[i*n_segment_h + 0],hid_taps[0])
-        for j in xrange(i,n_segment_h):  # 下标从i开始，可以使其成为上三角矩阵
+        h_tmp = T.dot(W_hid[i*n_segment_h + i],hid_taps[i]) # 下标从i开始，可以使其成为上三角矩阵
+        for j in xrange(i+1,n_segment_h):  
             h_tmp += T.dot(W_hid[i*n_segment_h + j],hid_taps[j])
         h_list_r.extend([h_tmp])
         h_list[i] += h_list_r[i]   # sum
@@ -184,15 +185,68 @@ def  gen_random_mask(sampleNum,n_segment_h):
         
     return data_mask
 
+def prepare_data(data_x, data_mask, data_y):
+    '''
+    将数据分为训练集，验证集和测试集
+    '''
+    data_len = len(data_y)
+    train_end = numpy.floor(data_len * 0.6)
+    valid_end = numpy.floor(data_len * 0.8)
+
+    train_data_x = data_x[:train_end]
+    train_data_mask = data_mask[:train_end,:]
+    train_data_y = data_y[:train_end]
+
+    valid_data_x = data_x[train_end:valid_end]
+    valid_data_mask = data_mask[train_end:valid_end,:]
+    valid_data_y = data_y[train_end:valid_end]
+
+    test_data_x = data_x[valid_end:data_len]
+    test_data_mask = data_mask[valid_end:data_len,:]
+    test_data_y = data_y[valid_end:data_len]
+
+    train_data = [train_data_x, train_data_mask, train_data_y]
+    valid_data = [valid_data_x, valid_data_mask, valid_data_y]
+    test_data = [test_data_x, test_data_mask, test_data_y]
+
+    return train_data, valid_data, test_data 
+
+def get_minibatches_idx(n, minibatch_size, overhead, shuffle=False):
+    """
+    对总的时间序列进行切片
+    n : 序列的总长度 
+    minibatch_size : 切片的序列长度
+    overhead : x 映射到y 时的延时长度
+    shuffle : 是否进行重排。 对于时间序列，原始数据不能重排，
+    """
+
+    idx_list = numpy.arange(n, dtype="int32")
+
+    minibatches = []
+    minibatch_start = 0
+    end_index = n - overhead
+    for i in range(end_index // minibatch_size):
+        minibatches.append(idx_list[minibatch_start:
+                                    minibatch_start + minibatch_size + overhead])
+        minibatch_start += minibatch_size
+
+    if (minibatch_start != end_index):
+        # Make a minibatch out of what is left
+        minibatches.append(idx_list[minibatch_start:])
+
+    if shuffle:
+        numpy.random.shuffle(minibatches)
+
+    return zip(range(len(minibatches)), minibatches)
 
 '''
 主程序
 '''
 # 设置网络参数
-n_input = 15
+n_input = 15      # 输入数据的长度
 n_hidden = 15
 n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
-n_segment_x = 3   # 输入进行分块的块数，需保证整除
+n_segment_x = 5   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
 n_epochs = 1000
@@ -206,12 +260,15 @@ g = DG.Generator()
 data_x,data_y = g.get_data(3)
 N = data_y.shape[0]
 
-sampleNum = 400-n_input
-index = range(sampleNum)
-data_mask = gen_random_mask(sampleNum,n_segment_h)
+# sampleNum = 400-n_input
+
+data_mask = gen_random_mask(N,n_segment_h)
 print 'data_mask:', data_mask.shape
 print data_mask
 
+train_data, valid_data, test_data = prepare_data(data_x, data_mask, data_y)
+
+###########################################################
 # 构造网络
 x_in = T.vector()   # 输入向量,第1维是时间
 x_mask = T.matrix()
@@ -242,6 +299,8 @@ params.extend(W_in)
 params.extend(b_in)
 params.extend(W_hid)
 
+start_compile_time = time.clock()  
+
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
@@ -260,7 +319,7 @@ y,updates = theano.scan(purelin,
                         non_sequences=params_1)
 y = T.flatten(y)                    
                         
-cost = ((y_out[n_input:,]-y)**2).sum()
+cost = ((y_out[n_input-1:]-y)**2).sum()
 
 params4grad = []
 
@@ -283,27 +342,88 @@ for p in params4grad:
 lr_v = 0.0001
 lr_ada = theano.tensor.scalar(name='lr_ada')
 
-f_pred = theano.function([x_in, x_mask],                             
-                         outputs=y)  
+f_pred = theano.function([x_in, x_mask], outputs=y)
+pred_cost = theano.function([x_in, x_mask, y_out], outputs=cost)  
 
 updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, x_mask, y_out, cost)
 
-print 'data info:', data_x.shape, data_y.shape
+
+######################################
+# train
+print 'train info:', train_data[0].shape, train_data[1].shape, train_data[2].shape
+print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].shape
+print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
+history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
+history_errs_cur_index = 0
+patience = n_epochs
+valid_fre = 1
+bad_counter = 0
+
+overhead = n_input - 1 
+batch_size = 20   #设置的足够大时，等价于GD
+
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  
-        print 'cost = {}: {}'.format(epochs_index, f_grad_shared(data_x, data_mask, data_y))
+
+    kf = get_minibatches_idx(len(train_data[0]), batch_size, overhead, shuffle=True)
+
+    for batch_index, train_index in kf:
+        _x = [train_data[0][t]for t in train_index]
+        _mask = [train_data[1][t]for t in train_index]
+        _y = [train_data[2][t]for t in train_index]
+
+
+        train_err = f_grad_shared(_x, _mask, _y)
         f_update(lr_v)
-    
+
+        #print '{}:{} train_batch error={:.3f}'.format(epochs_index, batch_index, float(train_err))
+
+    if numpy.mod(epochs_index+1, valid_fre) == 0:    
+        valid_err = pred_cost(valid_data[0], valid_data[1], valid_data[2])
+        test_err = pred_cost(test_data[0], test_data[1], test_data[2])
+
+        print '{}: train error={:.3f}, valid error={:.3f}, test error={:.3f}'.format(
+            epochs_index, float(train_err), float(valid_err), float(test_err))
+
+        history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
+        history_errs_cur_index += 1
+
+        if valid_err <= history_errs[:history_errs_cur_index,1].min():
+            bad_counter = 0
+
+        if history_errs_cur_index > patience and  valid_err >= history_errs[:history_errs_cur_index-patience,1].min():
+            bad_counter += 1
+            if bad_counter > patience:
+                print 'Early Stop!'
+                break
+  
+
 y_sim = f_pred(data_x, data_mask) 
 
 print y_sim.shape
 
-plt.plot(range(data_y.shape[0]-y_sim.shape[0],data_y.shape[0]), y_sim, 'r')
-plt.plot(range(data_x.shape[0]), data_x,'b')
-plt.plot(range(data_y.shape[0]), data_y,'k')
+index_start = data_x.shape[0]-y_sim.shape[0]
+index_train_end = train_data[0].shape[0]
+index_valid_end = index_train_end + valid_data[0].shape[0]
+index_test_end = index_valid_end + test_data[0].shape[0]
+
+plt.figure(1)
+
+plt.plot( range(index_start, index_train_end),     y_sim[:index_train_end-index_start], 'r')
+plt.plot( range(index_train_end, index_valid_end), y_sim[index_train_end-index_start:index_valid_end-index_start], 'g')
+plt.plot( range(index_valid_end, index_test_end),  y_sim[index_valid_end-index_start:index_test_end-index_start], 'b')
+
+plt.plot( range(data_x.shape[0]), data_x,'b.')
+plt.plot( range(data_y.shape[0]), data_y,'k')
+
+plt.figure(2)
+plt.plot( range(history_errs_cur_index),  history_errs[:,0], 'r')
+plt.plot( range(history_errs_cur_index),  history_errs[:,1], 'g')
+plt.plot( range(history_errs_cur_index),  history_errs[:,2], 'b')
+plt.show()
                           
-print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.))
+print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)
         
 print "finished!"
 
-plt.show()
+

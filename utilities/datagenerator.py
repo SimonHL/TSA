@@ -19,8 +19,9 @@ class Generator(object):
         return data_x, data_y
     
     def data_gen_y_sin(self):
-        data_x = numpy.zeros((400,))
-        data_y = 1.0 * numpy.sin(30 * numpy.pi * numpy.linspace(0,1,400))
+        length = 1000
+        data_x = numpy.zeros((length,))
+        data_y = 1.0 * numpy.sin(30 * numpy.pi * numpy.linspace(0,1,length))
         return data_x, data_y
 
     def data_gen_x(self, n):
