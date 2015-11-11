@@ -13,7 +13,7 @@ class Generator(object):
         }
 
     def load_data(self):
-        data = numpy.genfromtxt("..\mytestdata.txt")
+        data = numpy.genfromtxt("mytestdata.txt")
         data_x = data[:,0]
         data_y = data[:,1]
         return data_x, data_y
@@ -21,7 +21,7 @@ class Generator(object):
     def data_gen_y_sin(self):
         length = 1000
         data_x = numpy.zeros((length,))
-        data_y = 1.0 * numpy.sin(30 * numpy.pi * numpy.linspace(0,1,length))
+        data_y = 1.0 * numpy.sin(20 * numpy.pi * numpy.linspace(0,1,length))
         return data_x, data_y
 
     def data_gen_x(self, n):

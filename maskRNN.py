@@ -249,7 +249,7 @@ n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
 n_segment_x = 5   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
-n_epochs = 1000
+n_epochs = 500
 
 dtype=theano.config.floatX
 
@@ -363,7 +363,7 @@ valid_fre = 1
 bad_counter = 0
 
 overhead = n_input - 1 
-batch_size = 20   #设置的足够大时，等价于GD
+batch_size = 1   #设置的足够大时，等价于GD
 
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  

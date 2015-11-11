@@ -24,6 +24,8 @@ import theano
 import theano.tensor as T
 import matplotlib.pyplot as plt
 
+import utilities.datagenerator as DG
+
 def step(*args):
     #global n_input, n_hidden 
     print args
@@ -50,9 +52,6 @@ def purelin(*args):
     W_in =  [args[u] for u in xrange(1, n_input + 1)]
     b_in = args[n_input + 1]
     W_hid = args[n_input + 2]
-    W_in
-    b_in
-    W_hid
     W_out = args[n_input + 3]
     b_out = args[n_input + 4]
 
@@ -60,25 +59,20 @@ def purelin(*args):
     return T.tanh(y)
     
 # 设置网络参数
-learning_rate = 0.001
-n_input = 10
-n_hidden = 30
+learning_rate = 0.0003
+n_input = 4
+n_hidden = 10
 n_output = 1
 N = 400
-n_epochs = 1000
+n_epochs = 2000
 
 dtype=theano.config.floatX
 
 # 加要处理的数据
-data = numpy.genfromtxt("mytestdata.txt")
-sampleNum = 400-n_input
-index = range(sampleNum)
-data_x = data[:,0]
-data_y = data[:,1]
+g = DG.Generator()
+data_x,data_y = g.get_data(0)
 
 print data_x.shape, data_y.shape
-
-data_x = numpy.zeros_like(data_x)
 
 
 print 'network: n_in:{},n_hidden:{},n_out:{}'.format(n_input, n_hidden, n_output)
@@ -152,9 +146,8 @@ sim_fn = theano.function([x_in],
 print 'Running ({} epochs)'.format(n_epochs)        
 start_time = time.clock()     
 
-for epochs_index in xrange(n_epochs) :             
-    print train_fn(data_x, data_y)
-    print 'Training {}'.format(epochs_index) 
+for epochs_index in xrange(n_epochs):             
+    print '{}: cost={}'.format(epochs_index, train_fn(data_x, data_y)) 
   
 y_sim = sim_fn(data_x)  
 print y_sim.shape
@@ -166,7 +159,7 @@ plt.plot(range(data_y.shape[0]), data_y,'k')
                           
 print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.))
 
-print h_init.get_value()   
+plt.show()   
 
          
 print "finished!"

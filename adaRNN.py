@@ -25,6 +25,8 @@ import theano.tensor as T
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 
+import utilities.datagenerator as DG
+
 def numpy_floatX(data):
     return numpy.asarray(data, dtype=theano.config.floatX)
 
@@ -128,7 +130,7 @@ def adadelta(lr, tparams, grads, x, y, cost):
     
 # 设置网络参数
 learning_rate = 0.002
-n_input = 4 
+n_input = 4
 n_hidden = 10
 n_output = 1
 N = 400
@@ -139,11 +141,8 @@ dtype=theano.config.floatX
 theano.config.exception_verbosity = 'high'
 
 # 加要处理的数据
-data = numpy.genfromtxt("mytestdata.txt")
-sampleNum = 400-n_input
-index = range(sampleNum)
-data_x = data[:,0]
-data_y = data[:,1]
+g = DG.Generator()
+data_x,data_y = g.get_data(0)
 
 print data_x.shape, data_y.shape
 
@@ -201,15 +200,13 @@ for p in params:
 lr_v = 0.0001
 lr_ada = theano.tensor.scalar(name='lr_ada')
 
-f_pred = theano.function([x_in],                             
-                         outputs=y)  
+f_pred = theano.function([x_in],outputs=y)  
 
 updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, y_out, cost)
 
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  
-     
-        print 'cost = : ', f_grad_shared(data_x, data_y)
+        print '{}: cost={}'.format(epochs_index, f_grad_shared(data_x, data_y)) 
         f_update(lr_v)
     
 y_sim = f_pred(data_x) 

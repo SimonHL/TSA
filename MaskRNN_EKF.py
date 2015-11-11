@@ -239,6 +239,55 @@ def get_minibatches_idx(n, minibatch_size, overhead, shuffle=False):
 
     return zip(range(len(minibatches)), minibatches)
 
+def extend_kalman_train(W, y_hat, y, x, x_mask):
+    '''
+    P: 状态对应的协方差矩阵
+    Qv: 观测噪声的协方差矩阵
+    Qw: 输入噪声的协方差矩阵
+    W: 需要估计的状态
+    y_hat: 系统的输出
+    y: 期望的输出
+
+    注意：P, Qv, Qw, W的元素个数相同，类型均为list, 对应不同的W
+    '''
+
+    # 初始值
+    P = [theano.shared( numpy.eye(p.get_value().shape[0])*numpy_floatX(1.0)  ) for p in W]
+    Qv = [theano.shared( numpy.eye(p.get_value().shape[0])*numpy_floatX(1.0)  ) for p in W]
+    Qw = [theano.shared( numpy.eye(p.get_value().shape[0])*numpy_floatX(1.0)  ) for p in W]
+
+
+    # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
+    B = []
+    for _W in W:
+        J, updates = theano.scan(lambda i, y_hat,W: T.grad(y_hat[i], _W), 
+                                 sequences=T.arange(y_hat.shape[0]), 
+                                 non_sequences=[y_hat, _W])
+        B.extend([J])
+
+    # 计算残差
+    a = y - y_hat
+
+    # 计算增益矩阵
+    G = [_P * _B.T * (_B * _P * _B.T + _Qv) for (_P,_B,_Qv) in zip(P,B,Qv)]
+
+    # 计算新的状态
+    update_W = [(_W, _W + _G * a.T ) for (_G, _W) in zip(G,W)]
+
+    # 计算新的状态协方差阵
+    update_P = [ (_P, _P - _G * _B * _P + _Qw) for (_P, _B, _Qw) in zip(P,B,Qw) ]
+
+    update_W.extend(update_P)
+
+
+    f_train = theano.function([x, x_mask, y], y_hat, updates=update_W,
+                                    name='EKF_f_train',
+                                    mode=compile_mode)
+
+    return f_train
+
+   
+
 '''
 主程序
 '''
@@ -336,96 +385,98 @@ for i in xrange(n_segment_h):
 params4grad.extend(W_out)   
 params4grad.extend(b_out)
 
-# 编译表达式
-grads = theano.tensor.grad(cost, wrt=params4grad)
-tparams = OrderedDict()
-for p in params4grad:
-    tparams[p.name] = p   
+f_train =  extend_kalman_train(params4grad, y, y_out, x_in, x_mask)
 
-lr_v = 0.0001
-lr_ada = theano.tensor.scalar(name='lr_ada')
+# # 编译表达式
+# grads = theano.tensor.grad(cost, wrt=params4grad)
+# tparams = OrderedDict()
+# for p in params4grad:
+#     tparams[p.name] = p   
 
-f_pred = theano.function([x_in, x_mask], outputs=y)
-pred_cost = theano.function([x_in, x_mask, y_out], outputs=cost)  
+# lr_v = 0.0001
+# lr_ada = theano.tensor.scalar(name='lr_ada')
 
-updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, x_mask, y_out, cost)
+# f_pred = theano.function([x_in, x_mask], outputs=y)
+# pred_cost = theano.function([x_in, x_mask, y_out], outputs=cost)  
 
-
-######################################
-# train
-print 'train info:', train_data[0].shape, train_data[1].shape, train_data[2].shape
-print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].shape
-print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
-history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
-history_errs_cur_index = 0
-patience = n_epochs
-valid_fre = 1
-bad_counter = 0
-
-overhead = n_input - 1 
-batch_size = 20   #设置的足够大时，等价于GD
-
-start_time = time.clock()   
-for epochs_index in xrange(n_epochs) :  
-
-    kf = get_minibatches_idx(len(train_data[0]), batch_size, overhead, shuffle=True)
-
-    for batch_index, train_index in kf:
-        _x = [train_data[0][t]for t in train_index]
-        _mask = [train_data[1][t]for t in train_index]
-        _y = [train_data[2][t]for t in train_index]
+# updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, x_mask, y_out, cost)
 
 
-        train_err = f_grad_shared(_x, _mask, _y)
-        f_update(lr_v)
+# ######################################
+# # train
+# print 'train info:', train_data[0].shape, train_data[1].shape, train_data[2].shape
+# print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].shape
+# print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
+# history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
+# history_errs_cur_index = 0
+# patience = n_epochs
+# valid_fre = 1
+# bad_counter = 0
 
-        #print '{}:{} train_batch error={:.3f}'.format(epochs_index, batch_index, float(train_err))
+# overhead = n_input - 1 
+# batch_size = 20   #设置的足够大时，等价于GD
 
-    if numpy.mod(epochs_index+1, valid_fre) == 0:    
-        valid_err = pred_cost(valid_data[0], valid_data[1], valid_data[2])
-        test_err = pred_cost(test_data[0], test_data[1], test_data[2])
+# start_time = time.clock()   
+# for epochs_index in xrange(n_epochs) :  
 
-        print '{}: train error={:.3f}, valid error={:.3f}, test error={:.3f}'.format(
-            epochs_index, float(train_err), float(valid_err), float(test_err))
+#     kf = get_minibatches_idx(len(train_data[0]), batch_size, overhead, shuffle=True)
 
-        history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
-        history_errs_cur_index += 1
+#     for batch_index, train_index in kf:
+#         _x = [train_data[0][t]for t in train_index]
+#         _mask = [train_data[1][t]for t in train_index]
+#         _y = [train_data[2][t]for t in train_index]
 
-        if valid_err <= history_errs[:history_errs_cur_index,1].min():
-            bad_counter = 0
 
-        if history_errs_cur_index > patience and  valid_err >= history_errs[:history_errs_cur_index-patience,1].min():
-            bad_counter += 1
-            if bad_counter > patience:
-                print 'Early Stop!'
-                break
+#         train_err = f_grad_shared(_x, _mask, _y)
+#         f_update(lr_v)
+
+#         #print '{}:{} train_batch error={:.3f}'.format(epochs_index, batch_index, float(train_err))
+
+#     if numpy.mod(epochs_index+1, valid_fre) == 0:    
+#         valid_err = pred_cost(valid_data[0], valid_data[1], valid_data[2])
+#         test_err = pred_cost(test_data[0], test_data[1], test_data[2])
+
+#         print '{}: train error={:.3f}, valid error={:.3f}, test error={:.3f}'.format(
+#             epochs_index, float(train_err), float(valid_err), float(test_err))
+
+#         history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
+#         history_errs_cur_index += 1
+
+#         if valid_err <= history_errs[:history_errs_cur_index,1].min():
+#             bad_counter = 0
+
+#         if history_errs_cur_index > patience and  valid_err >= history_errs[:history_errs_cur_index-patience,1].min():
+#             bad_counter += 1
+#             if bad_counter > patience:
+#                 print 'Early Stop!'
+#                 break
   
 
-y_sim = f_pred(data_x, data_mask) 
+# y_sim = f_pred(data_x, data_mask) 
 
-print y_sim.shape
+# print y_sim.shape
 
-index_start = data_x.shape[0]-y_sim.shape[0]
-index_train_end = train_data[0].shape[0]
-index_valid_end = index_train_end + valid_data[0].shape[0]
-index_test_end = index_valid_end + test_data[0].shape[0]
+# index_start = data_x.shape[0]-y_sim.shape[0]
+# index_train_end = train_data[0].shape[0]
+# index_valid_end = index_train_end + valid_data[0].shape[0]
+# index_test_end = index_valid_end + test_data[0].shape[0]
 
-plt.figure(1)
+# plt.figure(1)
 
-plt.plot( range(index_start, index_train_end),     y_sim[:index_train_end-index_start], 'r')
-plt.plot( range(index_train_end, index_valid_end), y_sim[index_train_end-index_start:index_valid_end-index_start], 'g')
-plt.plot( range(index_valid_end, index_test_end),  y_sim[index_valid_end-index_start:index_test_end-index_start], 'b')
+# plt.plot( range(index_start, index_train_end),     y_sim[:index_train_end-index_start], 'r')
+# plt.plot( range(index_train_end, index_valid_end), y_sim[index_train_end-index_start:index_valid_end-index_start], 'g')
+# plt.plot( range(index_valid_end, index_test_end),  y_sim[index_valid_end-index_start:index_test_end-index_start], 'b')
 
-plt.plot( range(data_x.shape[0]), data_x,'b.')
-plt.plot( range(data_y.shape[0]), data_y,'k')
+# plt.plot( range(data_x.shape[0]), data_x,'b.')
+# plt.plot( range(data_y.shape[0]), data_y,'k')
 
-plt.figure(2)
-plt.plot( range(history_errs_cur_index),  history_errs[:,0], 'r')
-plt.plot( range(history_errs_cur_index),  history_errs[:,1], 'g')
-plt.plot( range(history_errs_cur_index),  history_errs[:,2], 'b')
-plt.show()
+# plt.figure(2)
+# plt.plot( range(history_errs_cur_index),  history_errs[:,0], 'r')
+# plt.plot( range(history_errs_cur_index),  history_errs[:,1], 'g')
+# plt.plot( range(history_errs_cur_index),  history_errs[:,2], 'b')
+# plt.show()
                           
-print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)
+# print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)
         
 print "finished!"
 
