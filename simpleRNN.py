@@ -37,11 +37,12 @@ def step(*args):
     W_hid = args[n_input * 2 + 2]
     
     
-    h = T.dot(x[0], W_in[0]) + b_in
-    for j in xrange(1, n_input):              # 前向部分
-        h = h +  T.dot(x[j], W_in[j]) + b_in
+    h = T.dot(x[0], W_in[0])
+    for j in xrange(1, n_input):           # 前向部分
+        h +=  T.dot(x[j], W_in[j])
     
-    h = h + T.dot(hid_taps, W_hid)            # 回归部分
+    h += T.dot(hid_taps, W_hid)            # 回归部分
+    h += b_in                              # 偏置部分
 
         
     return T.tanh(h)
@@ -59,7 +60,7 @@ def purelin(*args):
     return T.tanh(y)
     
 # 设置网络参数
-learning_rate = 0.0003
+learning_rate = 0.0005
 n_input = 4
 n_hidden = 10
 n_output = 1
@@ -151,11 +152,10 @@ for epochs_index in xrange(n_epochs):
   
 y_sim = sim_fn(data_x)  
 print y_sim.shape
-print b_in.get_value() 
 
-plt.plot(range(y_sim.shape[0]), y_sim, 'r')
 plt.plot(range(data_x.shape[0]), data_x,'b')
 plt.plot(range(data_y.shape[0]), data_y,'k')
+plt.plot(range(data_y.shape[0]-y_sim.shape[0], data_y.shape[0]), y_sim, 'r')
                           
 print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.))
 

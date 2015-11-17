@@ -15,8 +15,8 @@ from collections import OrderedDict
 
 import utilities.datagenerator as DG
 
-# compile_mode = 'FAST_COMPILE'
-compile_mode = 'FAST_RUN'
+compile_mode = 'FAST_COMPILE'
+# compile_mode = 'FAST_RUN'
 
 # Set the random number generators' seeds for consistency
 SEED = 100
@@ -100,6 +100,84 @@ def purelin(*args):
         y += T.dot(W_out[j],h[j]) + b_out[j]
 
     return T.tanh(y)
+
+def extend_kalman_train(W, y_hat, dim_y_hat, y, x):
+    '''
+    P: 状态对应的协方差矩阵
+    Qv: 观测噪声的协方差矩阵
+    Qw: 输入噪声的协方差矩阵
+    W: 需要估计的状态
+    y_hat: 系统的输出
+    dim_y_hat: y_hat 的维数
+    y: 期望的输出
+
+    注意：P, Qv, Qw, W的元素个数相同，类型均为list, 对应不同的W
+    '''
+
+    # 系数矩阵的向量化
+    dim_Wv = 0
+    W_vec = []
+    for i in numpy.arange(len(W)):
+        dim_Wv += W[i].get_value().size
+        W_vec.extend([W[i].flatten()])
+    W_vec = tuple(W_vec)
+    W_vec = T.concatenate(W_vec)  
+
+    print 'number of parameters: ',dim_Wv
+
+    P = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(10.0)  ) # 状态的协方差矩阵
+    
+    Qw = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(10.0) )  # 输入噪声协方差矩阵， 
+    
+    Qv = theano.shared( numpy.eye(dim_y_hat) * numpy_floatX(0.01) )  # 观测噪声协方差矩阵
+
+    # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
+    B = []
+    for _W in W:
+        J, updates = theano.scan(lambda i, y_hat, W: T.grad(y_hat[i], _W).flatten(), 
+                                 sequences=T.arange(y_hat.shape[0]), 
+                                 non_sequences=[y_hat, _W])
+        B.extend([J])
+
+    B = T.concatenate(tuple(B),axis=1)
+
+    # 计算残差
+    a = y - y_hat # 单步预测误差
+
+    # 计算增益矩阵
+    G = T.dot(T.dot(P,B.T), T.nlinalg.matrix_inverse(T.dot(T.dot(B,P),B.T)+Qv)) 
+
+    # 计算新的状态
+    update_W_vec = W_vec  +  T.dot(a,G.T) #(T.dot(G, a)).T
+
+    # 计算新的状态协方差阵
+    delta_P = -T.dot(T.dot(G,B), P) + Qw 
+    update_P = [(P, P + delta_P)] 
+
+    # 逆矢量化
+    bi = 0
+    delta_W = []
+    for i in numpy.arange(len(W)):
+        be = bi+W[i].size
+        delta_tmp = update_W_vec[bi:be]
+        delta_W.append( delta_tmp.reshape(W[i].shape) )
+        bi = be
+
+    update_W = [ (_W, _dW) for (_W, _dW) in  zip(W, delta_W) ]
+
+    update_W.extend(update_P)
+
+    update_Qw = [(Qw,  1.0 * Qw)]
+
+    update_W.extend(update_Qw)
+
+    f_train = theano.function([x, y], T.dot(a, a.T), updates=update_W,
+                                    name='EKF_f_train',
+                                    mode=compile_mode,
+                                    givens=[(H, h_init)],
+                                    on_unused_input='warn')
+
+    return f_train, P
 
 def adadelta(lr, tparams, grads, x, x_mask, y, cost):
     """
@@ -298,18 +376,15 @@ n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
 n_segment_x = 5   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
-n_epochs = 1000
+n_epochs = 1
 
 dtype=theano.config.floatX
 
-theano.config.exception_verbosity = 'high'
+theano.config.exception_verbosity = 'low'
 
 # 加要处理的数据
 g = DG.Generator()
-data_x,data_y = g.get_data(3)
-N = data_y.shape[0]
-
-# sampleNum = 400-n_input
+data_x,data_y = g.get_data('mackey_glass')
 
 data_mask = gen_random_mask(N,n_segment_h)
 print 'data_mask:', data_mask.shape

@@ -9,48 +9,60 @@ compile_mode = 'FAST_COMPILE'
 # compile_mode = 'FAST_RUN'
 
 # Set the random number generators' seeds for consistency
-SEED = 200
+SEED = 100
 numpy.random.seed(SEED)
 
 def numpy_floatX(data):
     return numpy.asarray(data, dtype=theano.config.floatX)
 
-def get_minibatches_idx(n, minibatch_size, overhead, shuffle=False):
+def get_seq_minibatches_idx(n, minibatch_size, overhead, shuffle=False):
     """
-    对总的时间序列进行切片
+    对总的时间序列进行切片，从数据中随机选取一个起点
+    Input：
     n : 序列的总长度 
-    minibatch_size : 切片的序列长度
-    overhead : x 映射到y 时的延时长度
-    shuffle : 是否进行重排。 对于时间序列，原始数据不能重排，
+    minibatch_size : 切片的序列长度，对于单输出而言，等价于BPTT的深度， 也等价于y的维数
+    overhead: x 映射到y 时的延时长度，即x序列长度和输出y序列长度的差值
+               对于单步预测，overhead = n_input
+               对于滤波，overhead= n_input-1
+    shuffle : 是否进行重排，用以选择随机的开始位置
+    Return：
+    minibatches_index： 子序列的编号
+    minibatches： 子序列
     """
 
-    idx_list = numpy.arange(n, dtype="int32")
+    idx_list = numpy.arange(n)
+
+    len_sub_seq = overhead+minibatch_size       # 子序列的长度
+    num_sub_seq = n-len_sub_seq+1               # 子序列的个数 
+    start_list = numpy.arange(num_sub_seq)      # 起始位置列表
+    if shuffle:
+        numpy.random.shuffle(start_list)
 
     minibatches = []
-    minibatch_start = 0
-    end_index = n - overhead
-    for i in range(end_index // minibatch_size):
-        minibatches.append(idx_list[minibatch_start:
-                                    minibatch_start + minibatch_size + overhead])
-        minibatch_start += minibatch_size
+    for start_index in start_list:
+        minibatches.append(idx_list[start_index: start_index + len_sub_seq])
 
-    if (minibatch_start != end_index):
-        # Make a minibatch out of what is left
-        minibatches.append(idx_list[minibatch_start:])
+    minibatches_index = numpy.arange(len(minibatches)) # 切片的编号
 
-    if shuffle:
-        numpy.random.shuffle(minibatches)
+    return zip(numpy.arange(num_sub_seq), minibatches) 
 
-    return zip(range(len(minibatches)), minibatches)
+def test_seq_batch_index():
+
+    data_len = 20
+    batch_size = 4
+    overhead = 3
+
+    print get_seq_minibatches_idx(data_len, batch_size, overhead, True)
 
 
-def extend_kalman_train(W, y_hat, y, x):
+def extend_kalman_train(W, y_hat, dim_y_hat, y, x):
     '''
     P: 状态对应的协方差矩阵
     Qv: 观测噪声的协方差矩阵
     Qw: 输入噪声的协方差矩阵
     W: 需要估计的状态
     y_hat: 系统的输出
+    dim_y_hat: y_hat 的维数
     y: 期望的输出
 
     注意：P, Qv, Qw, W的元素个数相同，类型均为list, 对应不同的W
@@ -65,22 +77,18 @@ def extend_kalman_train(W, y_hat, y, x):
     W_vec = tuple(W_vec)
     W_vec = T.concatenate(W_vec)  
 
-    dim_y_hat = n_output
+    print 'number of parameters: ',dim_Wv
 
-    print dim_Wv, dim_y_hat
-    print W_vec
-
-    P = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(10.0)  ) # 状态的协方差矩阵
+    P = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(100.0)  ) # 状态的协方差矩阵
     
-    Qw = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(10.0) )  # 输入噪声协方差矩阵， 
+    Qw = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(100.0) )  # 输入噪声协方差矩阵， 
     
     Qv = theano.shared( numpy.eye(dim_y_hat) * numpy_floatX(0.01) )  # 观测噪声协方差矩阵
-
 
     # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
     B = []
     for _W in W:
-        J, updates = theano.scan(lambda i, y_hat, W: T.grad(y_hat[i][0], _W).flatten(), 
+        J, updates = theano.scan(lambda i, y_hat, W: T.grad(y_hat[i], _W).flatten(), 
                                  sequences=T.arange(y_hat.shape[0]), 
                                  non_sequences=[y_hat, _W])
         B.extend([J])
@@ -88,15 +96,13 @@ def extend_kalman_train(W, y_hat, y, x):
     B = T.concatenate(tuple(B),axis=1)
 
     # 计算残差
-    a = y - y_hat
+    a = y - y_hat # 单步预测误差
 
     # 计算增益矩阵
     G = T.dot(T.dot(P,B.T), T.nlinalg.matrix_inverse(T.dot(T.dot(B,P),B.T)+Qv)) 
 
     # 计算新的状态
-    update_W_vec = W_vec  +  (T.dot(G, a)).T
-
-
+    update_W_vec = W_vec  +  T.dot(a,G.T) #(T.dot(G, a)).T
 
     # 计算新的状态协方差阵
     delta_P = -T.dot(T.dot(G,B), P) + Qw 
@@ -107,7 +113,7 @@ def extend_kalman_train(W, y_hat, y, x):
     delta_W = []
     for i in numpy.arange(len(W)):
         be = bi+W[i].size
-        delta_tmp = update_W_vec[0,bi:be]
+        delta_tmp = update_W_vec[bi:be]
         delta_W.append( delta_tmp.reshape(W[i].shape) )
         bi = be
 
@@ -115,7 +121,7 @@ def extend_kalman_train(W, y_hat, y, x):
 
     update_W.extend(update_P)
 
-    update_Qw = [(Qw,  1.0* Qw)]
+    update_Qw = [(Qw,  0.9 * Qw)]
 
     update_W.extend(update_Qw)
 
@@ -124,50 +130,57 @@ def extend_kalman_train(W, y_hat, y, x):
                                     mode=compile_mode,
                                     on_unused_input='warn')
 
-    return f_train
+    return f_train, P
 
 
-mu = 0
-sigma = 0.1
+def test_EKF():
+    mu = 0
+    sigma = 0.1
 
-n_input = 4
-n_output = 1
+    n_input = 7
+    n_output = 9
 
-dtype=theano.config.floatX
-
-W = []
-
-W_in_data = numpy.random.normal(size=(n_output, n_input), loc=mu, scale=sigma)
-b_in_data = numpy.random.normal(size=(n_output,1), loc=mu, scale=sigma)
-
-W_in = theano.shared(W_in_data.astype(dtype), 
-                      name='W_in')              
-b_in = theano.shared(b_in_data.astype(dtype), name="b_in")
-
-W.extend([W_in])
-W.extend([b_in])
-
-x_in = T.col()
-y_out = T.tanh(T.dot(W_in, x_in) + b_in)
-y = T.col()
-
-W_true = numpy.array([[0.1, 0.5,  0.2,  -0.1]])
-b_true = numpy.array([0.03])
-sampleNum = 50
+    dtype=theano.config.floatX
 
 
-x_data = numpy.random.normal(size=(sampleNum,4,1))
-y_data = numpy.zeros(shape=(sampleNum,n_output, 1))
-for i in range(sampleNum):
-    y_data[i] = numpy.tanh(numpy.dot(W_true,x_data[i]) + b_true)
+    W_in_data = numpy.random.normal(size=(n_input, n_output), loc=mu, scale=sigma)
+    b_in_data = numpy.random.normal(size=(n_output,), loc=mu, scale=sigma)
 
-f_train = extend_kalman_train(W, y_out, y, x_in)
+    W_in = theano.shared(W_in_data.astype(dtype), name='W_in')              
+    b_in = theano.shared(b_in_data.astype(dtype), name="b_in")
 
-for i in range(sampleNum):
-    print f_train(x_data[i],y_data[i])
+    W = []
+    W.extend([W_in])
+    W.extend([b_in])
 
-print W_in.get_value()
-print b_in.get_value()
+    x_in = T.vector()
+    y_out = T.tanh(T.dot(x_in,W_in) + b_in)
+    y = T.vector()
+
+    W_true = numpy.random.normal(size=(n_input, n_output))
+    b_true = numpy.random.normal(size=(n_output))
+    sampleNum = 500
+
+    x_data = numpy.random.normal(size=(sampleNum,n_input))
+    y_data = numpy.zeros(shape=(sampleNum,n_output))
+    for i in range(sampleNum):
+        y_data[i] = numpy.tanh(numpy.dot(x_data[i], W_true) + b_true)
+
+    f_train, P = extend_kalman_train(W, y_out, n_output, y, x_in)
+
+    for i in range(sampleNum):
+        f_train(x_data[i],y_data[i])
+
+    print W_true - W_in.get_value()
+    print b_true - b_in.get_value()
+    print 'P'
+    print P.get_value()
+
+if __name__ == '__main__':
+    # test_seq_batch_index()
+    test_EKF()
+
+
 
 
 

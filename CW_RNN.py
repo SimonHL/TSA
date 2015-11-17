@@ -99,7 +99,7 @@ def purelin(*args):
     for j in xrange(1,n_segment_h):
         y += T.dot(W_out[j],h[j]) + b_out[j]
 
-    return T.tanh(y)
+    return y # T.tanh(y)
 
 def adadelta(lr, tparams, grads, x, x_mask, y, cost):
     """
@@ -257,7 +257,7 @@ theano.config.exception_verbosity = 'high'
 
 # 加要处理的数据
 g = DG.Generator()
-data_x,data_y = g.get_data(3)
+data_x,data_y = g.get_data('mackey_glass')
 N = data_y.shape[0]
 
 # sampleNum = 400-n_input
@@ -355,12 +355,12 @@ print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].sha
 print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
 history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
 history_errs_cur_index = 0
-patience = n_epochs
+patience = 10
 valid_fre = 1
 bad_counter = 0
 
 overhead = n_input - 1 
-batch_size = 20   #设置的足够大时，等价于GD
+batch_size = 20000   #设置的足够大时，等价于GD
 
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  

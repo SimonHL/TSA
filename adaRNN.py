@@ -1,20 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Aug 27 16:22:26 2015
 使用Elman网络（简单局部回归网络）
-
-load phoneme
-p = con2seq(y);
-t = con2seq(t);
-lrn_net = newlrn(p,t,8);
-lrn_net.trainFcn = 'trainbr';
-lrn_net.trainParam.show = 5;
-lrn_net.trainParam.epochs = 50;
-lrn_net = train(lrn_net,p,t);
-
-y = sim(lrn_net,p);
-plot(cell2mat(y));
-
 
 @author: simon
 """
@@ -27,8 +13,21 @@ from collections import OrderedDict
 
 import utilities.datagenerator as DG
 
+compile_mode = 'FAST_COMPILE'
+# compile_mode = 'FAST_RUN'
+
+# Set the random number generators' seeds for consistency
+SEED = 100
+numpy.random.seed(SEED)
+
+
 def numpy_floatX(data):
     return numpy.asarray(data, dtype=theano.config.floatX)
+
+def data_get_data_x_y(seq_data, overhead):
+    data_x = seq_data[:-1]        # 最后一个不参与
+    data_y = seq_data[overhead:]
+    return data_x, data_y
 
 def step(*args):
     #global n_input, n_hidden 
@@ -41,11 +40,12 @@ def step(*args):
     W_hid = args[n_input * 2 + 2]
     
     
-    h = T.dot(x[0], W_in[0]) + b_in
-    for j in xrange(1, n_input):              # 前向部分
-        h = h +  T.dot(x[j], W_in[j]) + b_in
+    h = T.dot(x[0], W_in[0])
+    for j in xrange(1, n_input):           # 前向部分
+        h +=  T.dot(x[j], W_in[j])
     
-    h = h + T.dot(hid_taps, W_hid)            # 回归部分
+    h += T.dot(hid_taps, W_hid)            # 回归部分
+    h += b_in                              # 偏置部分
 
         
     return T.tanh(h)
@@ -60,7 +60,7 @@ def purelin(*args):
     b_out = args[n_input + 4]
 
     y = T.dot(h,W_out) + b_out
-    return T.tanh(y)
+    return  y #T.tanh(y)
 
 def adadelta(lr, tparams, grads, x, y, cost):
     """
@@ -129,32 +129,29 @@ def adadelta(lr, tparams, grads, x, y, cost):
     return updates_1, updates_2,f_grad_shared, f_update    
     
 # 设置网络参数
-learning_rate = 0.002
-n_input = 4
+n_input = 7
 n_hidden = 10
 n_output = 1
-N = 400
-n_epochs = 500
+n_epochs = 10
 
 dtype=theano.config.floatX
 
-theano.config.exception_verbosity = 'high'
+theano.config.exception_verbosity = 'low'
 
 # 加要处理的数据
 g = DG.Generator()
-data_x,data_y = g.get_data(0)
+data_x,data_y = g.get_data('mackey_glass')
 
 print data_x.shape, data_y.shape
-
 
 print 'network: n_in:{},n_hidden:{},n_out:{}'.format(n_input, n_hidden, n_output)
 
 # 构造网络
 x_in = T.vector()   # 输入向量,第1维是时间
 y_out = T.vector()  # 输出向量
-#lr = T.scalar()     # 学习速率，标量
+lr = T.scalar()     # 学习速率，标量
 
-#H = T.matrix()      # 隐单元的初始化值
+H = T.matrix()      # 隐单元的初始化值
     
 
 h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
@@ -187,11 +184,11 @@ y,updates = theano.scan(purelin,
 y = T.flatten(y)                    
                         
                         
-cost = ((y_out[n_input-1:,]-y)**2).sum()
+cost = ((y_out-y)**2).sum()
 
+batch_size = 100    # 设置的足够大时，等价于GD
 
-# 编译表达式
-
+print 'Batch Size: ', batch_size 
 grads = theano.tensor.grad(cost, wrt=params)
 tparams = OrderedDict()
 for p in params:
@@ -200,28 +197,32 @@ for p in params:
 lr_v = 0.0001
 lr_ada = theano.tensor.scalar(name='lr_ada')
 
-f_pred = theano.function([x_in],outputs=y)  
+sim_fn = theano.function([x_in],outputs=y)  
 
 updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, y_out, cost)
 
-start_time = time.clock()   
+start_time = time.clock() 
+
 for epochs_index in xrange(n_epochs) :  
-        print '{}: cost={}'.format(epochs_index, f_grad_shared(data_x, data_y)) 
+
+    kf = DG.DataPrepare.get_seq_minibatches_idx(data_y.shape[0], batch_size, n_input, shuffle=False)
+
+    for batch_index, train_index in kf:
+        sub_seq = data_y[train_index] 
+        _x, _y = data_get_data_x_y(sub_seq, n_input)
+        train_err = f_grad_shared(_x, _y)
         f_update(lr_v)
-    
-y_sim = f_pred(data_x) 
+        print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err)
 
-print y_sim.shape
-print b_in.get_value() 
+y_sim = sim_fn(data_x[:-1])  
+print 'y_sim.shape: ', y_sim.shape
 
-plt.plot(range(y_sim.shape[0]), y_sim, 'r')
-plt.plot(range(data_x.shape[0]), data_x,'b')
 plt.plot(range(data_y.shape[0]), data_y,'k')
-plt.show()
+plt.plot(range(data_y.shape[0]-y_sim.shape[0], data_y.shape[0]), y_sim, 'r')
+plt.plot(range(data_y.shape[0]-y_sim.shape[0], data_y.shape[0]), y_sim - data_y[n_input:], 'g')
                           
 print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.))
 
-print h_init.get_value()   
-
-         
+plt.show() 
+       
 print "finished!"

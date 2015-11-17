@@ -257,7 +257,7 @@ theano.config.exception_verbosity = 'high'
 
 # 加要处理的数据
 g = DG.Generator()
-data_x,data_y = g.get_data(3)
+data_x,data_y = g.get_data('mackey_glass')
 N = data_y.shape[0]
 
 # sampleNum = 400-n_input
