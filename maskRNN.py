@@ -12,18 +12,17 @@ import theano
 import theano.tensor as T
 import matplotlib.pyplot as plt
 from collections import OrderedDict
+import copy
 
 import utilities.datagenerator as DG
+reload(DG)
 
-# compile_mode = 'FAST_COMPILE'
-compile_mode = 'FAST_RUN'
+compile_mode = 'FAST_COMPILE'
+# compile_mode = 'FAST_RUN'
 
 # Set the random number generators' seeds for consistency
 SEED = 100
 numpy.random.seed(SEED)
-
-def numpy_floatX(data):
-    return numpy.asarray(data, dtype=theano.config.floatX)
 
 def step(*args):
     #global n_input, n_hidden
@@ -99,73 +98,7 @@ def purelin(*args):
     for j in xrange(1,n_segment_h):
         y += T.dot(W_out[j],h[j]) + b_out[j]
 
-    return T.tanh(y)
-
-def adadelta(lr, tparams, grads, x, x_mask, y, cost):
-    """
-    An adaptive learning rate optimizer
-
-    Parameters
-    ----------
-    lr : Theano SharedVariable
-        Initial learning rate
-    tpramas: Theano SharedVariable
-        Model parameters
-    grads: Theano variable
-        Gradients of cost w.r.t to parameres
-    x: Theano variable
-        Model inputs
-    mask: Theano variable
-        Sequence mask
-    y: Theano variable
-        Targets
-    cost: Theano variable
-        Objective fucntion to minimize
-
-    Notes
-    -----
-    For more information, see [ADADELTA]_.
-
-    .. [ADADELTA] Matthew D. Zeiler, *ADADELTA: An Adaptive Learning
-       Rate Method*, arXiv:1212.5701.
-    """
-
-    zipped_grads = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                  name='%s_grad' % k)
-                    for k, p in tparams.iteritems()]
-    running_up2 = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                 name='%s_rup2' % k)
-                   for k, p in tparams.iteritems()]
-    running_grads2 = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                    name='%s_rgrad2' % k)
-                      for k, p in tparams.iteritems()]
-
-    zgup = [(zg, g) for zg, g in zip(zipped_grads, grads)]
-    rg2up = [(rg2, 0.95 * rg2 + 0.05 * (g ** 2))
-             for rg2, g in zip(running_grads2, grads)]
-                 
-    updates_1 = zgup + rg2up
-
-    f_grad_shared = theano.function([x, x_mask, y], cost, updates=updates_1,
-                                    name='adadelta_f_grad_shared',
-                                    mode=compile_mode)
-
-    updir = [-T.sqrt(ru2 + 1e-6) / T.sqrt(rg2 + 1e-6) * zg
-             for zg, ru2, rg2 in zip(zipped_grads,
-                                     running_up2,
-                                     running_grads2)]
-    ru2up = [(ru2, 0.95 * ru2 + 0.05 * (ud ** 2))
-             for ru2, ud in zip(running_up2, updir)]
-    param_up = [(p, p + ud) for p, ud in zip(tparams.values(), updir)]
-    
-    updates_2 = ru2up + param_up;
-
-    f_update = theano.function([lr], [], updates=updates_2,
-                               on_unused_input='ignore',
-                               name='adadelta_f_update',
-                               mode=compile_mode)
-
-    return updates_1, updates_2,f_grad_shared, f_update    
+    return y # T.tanh(y)
 
 def  gen_random_mask(sampleNum,n_segment_h):
     data_mask = numpy.zeros((sampleNum,n_segment_h), dtype=numpy.bool)
@@ -190,7 +123,7 @@ def prepare_data(data_x, data_mask, data_y):
     将数据分为训练集，验证集和测试集
     '''
     data_len = len(data_y)
-    train_end = numpy.floor(data_len * 0.6)
+    train_end = numpy.floor(data_len * 0.5)
     valid_end = numpy.floor(data_len * 0.8)
 
     train_data_x = data_x[:train_end]
@@ -211,34 +144,6 @@ def prepare_data(data_x, data_mask, data_y):
 
     return train_data, valid_data, test_data 
 
-def get_minibatches_idx(n, minibatch_size, overhead, shuffle=False):
-    """
-    对总的时间序列进行切片
-    n : 序列的总长度 
-    minibatch_size : 切片的序列长度
-    overhead : x 映射到y 时的延时长度
-    shuffle : 是否进行重排。 对于时间序列，原始数据不能重排，
-    """
-
-    idx_list = numpy.arange(n, dtype="int32")
-
-    minibatches = []
-    minibatch_start = 0
-    end_index = n - overhead
-    for i in range(end_index // minibatch_size):
-        minibatches.append(idx_list[minibatch_start:
-                                    minibatch_start + minibatch_size + overhead])
-        minibatch_start += minibatch_size
-
-    if (minibatch_start != end_index):
-        # Make a minibatch out of what is left
-        minibatches.append(idx_list[minibatch_start:])
-
-    if shuffle:
-        numpy.random.shuffle(minibatches)
-
-    return zip(range(len(minibatches)), minibatches)
-
 '''
 主程序
 '''
@@ -249,7 +154,7 @@ n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
 n_segment_x = 5   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
-n_epochs = 500
+n_epochs = 10
 
 dtype=theano.config.floatX
 
@@ -270,9 +175,9 @@ train_data, valid_data, test_data = prepare_data(data_x, data_mask, data_y)
 
 ###########################################################
 # 构造网络
-x_in = T.vector()   # 输入向量,第1维是时间
+x = T.vector()      # 输入向量,第1维是时间
 x_mask = T.matrix()
-y_out = T.vector()  # 输出向量
+t = T.vector()      # 输出向量
     
 
 h_init = [theano.shared(numpy.zeros((n_hidden/n_segment_h,), dtype=dtype), 
@@ -304,7 +209,7 @@ start_compile_time = time.clock()
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
-                        sequences=[dict(input=x_in, taps=input_taps), x_mask],  # 从输出值中延时-1抽取
+                        sequences=[dict(input=x, taps=input_taps), x_mask],  # 从输出值中延时-1抽取
                         outputs_info=h_init,   # taps = [-1], default
                         non_sequences=params)
 
@@ -319,7 +224,7 @@ y,updates = theano.scan(purelin,
                         non_sequences=params_1)
 y = T.flatten(y)                    
                         
-cost = ((y_out[n_input-1:]-y)**2).sum()
+cost = ((t-y)**2).sum()
 
 params4grad = []
 
@@ -345,11 +250,10 @@ for p in params4grad:
 lr_v = 0.0001
 lr_ada = theano.tensor.scalar(name='lr_ada')
 
-f_pred = theano.function([x_in, x_mask], outputs=y)
-pred_cost = theano.function([x_in, x_mask, y_out], outputs=cost)  
+sim_fn = theano.function([x, x_mask], outputs=y)
+pred_cost = theano.function([x, x_mask, t], outputs=cost)  
 
-updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, x_mask, y_out, cost)
-
+updates_1, updates_2, f_grad_shared, f_update = DG.PublicFunction.adadelta(lr_ada, tparams, grads, [x, x_mask, t], cost)
 
 ######################################
 # train
@@ -358,32 +262,29 @@ print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].sha
 print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
 history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
 history_errs_cur_index = 0
-patience = n_epochs
+patience = 3
 valid_fre = 1
 bad_counter = 0
 
-overhead = n_input - 1 
-batch_size = 1   #设置的足够大时，等价于GD
+batch_size = 450   #设置的足够大时，等价于GD
 
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  
 
-    kf = get_minibatches_idx(len(train_data[0]), batch_size, overhead, shuffle=True)
+    kf = DG.DataPrepare.get_seq_minibatches_idx(train_data[2].shape[0], batch_size, n_input, shuffle=False)
 
     for batch_index, train_index in kf:
-        _x = [train_data[0][t]for t in train_index]
-        _mask = [train_data[1][t]for t in train_index]
-        _y = [train_data[2][t]for t in train_index]
-
-
+        sub_seq = train_data[2][train_index] 
+        _mask = copy.deepcopy(train_data[1][train_index])
+        _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
+        _mask = _mask[:-1]
         train_err = f_grad_shared(_x, _mask, _y)
         f_update(lr_v)
-
-        #print '{}:{} train_batch error={:.3f}'.format(epochs_index, batch_index, float(train_err))
+        print '{}.{}: train error={:.3f}'.format(epochs_index, batch_index, float(train_err))
 
     if numpy.mod(epochs_index+1, valid_fre) == 0:    
-        valid_err = pred_cost(valid_data[0], valid_data[1], valid_data[2])
-        test_err = pred_cost(test_data[0], test_data[1], test_data[2])
+        valid_err = pred_cost(valid_data[0][:-1], valid_data[1][:-1], valid_data[2][n_input:])
+        test_err = pred_cost(test_data[0][:-1], test_data[1][:-1], test_data[2][n_input:])
 
         print '{}: train error={:.3f}, valid error={:.3f}, test error={:.3f}'.format(
             epochs_index, float(train_err), float(valid_err), float(test_err))
@@ -399,30 +300,44 @@ for epochs_index in xrange(n_epochs) :
             if bad_counter > patience:
                 print 'Early Stop!'
                 break
-  
 
-y_sim = f_pred(data_x, data_mask) 
+# 使用Valid Data测试多步预测误差
+x_train_end = copy.deepcopy(train_data[0][-n_input:]) 
+x_train_mask_end = train_data[1][-1]
 
+n_predict = 200
+y_predict = numpy.zeros((n_predict,))
+for i in numpy.arange(n_predict):
+    x_train_mask_end.resize((1,x_train_mask_end.shape[0]))
+    y_predict[i] = sim_fn(x_train_end,x_train_mask_end)
+    x_train_end[:-1] = x_train_end[1:]
+    x_train_end[-1] = y_predict[i]
+    x_train_mask_end = valid_data[1][i]
+
+plt.figure(3)
+plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
+plt.plot(numpy.arange(valid_data[2].shape[0]), valid_data[2],'g')
+
+
+y_sim = sim_fn(data_x[:-1], data_mask[:-1])
+y_sim_index = numpy.arange(n_input, data_x.shape[0]) 
 print y_sim.shape
 
+plt.figure(1)
 index_start = data_x.shape[0]-y_sim.shape[0]
 index_train_end = train_data[0].shape[0]
 index_valid_end = index_train_end + valid_data[0].shape[0]
 index_test_end = index_valid_end + test_data[0].shape[0]
-
-plt.figure(1)
-
 plt.plot( range(index_start, index_train_end),     y_sim[:index_train_end-index_start], 'r')
 plt.plot( range(index_train_end, index_valid_end), y_sim[index_train_end-index_start:index_valid_end-index_start], 'g')
 plt.plot( range(index_valid_end, index_test_end),  y_sim[index_valid_end-index_start:index_test_end-index_start], 'b')
 
-plt.plot( range(data_x.shape[0]), data_x,'b.')
 plt.plot( range(data_y.shape[0]), data_y,'k')
 
 plt.figure(2)
-plt.plot( range(history_errs_cur_index),  history_errs[:,0], 'r')
-plt.plot( range(history_errs_cur_index),  history_errs[:,1], 'g')
-plt.plot( range(history_errs_cur_index),  history_errs[:,2], 'b')
+plt.plot( range(history_errs_cur_index),  history_errs[:history_errs_cur_index,0], 'r')
+plt.plot( range(history_errs_cur_index),  history_errs[:history_errs_cur_index,1], 'g')
+plt.plot( range(history_errs_cur_index),  history_errs[:history_errs_cur_index,2], 'b')
 plt.show()
                           
 print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)

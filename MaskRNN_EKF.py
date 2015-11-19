@@ -12,8 +12,10 @@ import theano
 import theano.tensor as T
 import matplotlib.pyplot as plt
 from collections import OrderedDict
+import copy
 
 import utilities.datagenerator as DG
+reload(DG)
 
 compile_mode = 'FAST_COMPILE'
 # compile_mode = 'FAST_RUN'
@@ -21,9 +23,6 @@ compile_mode = 'FAST_COMPILE'
 # Set the random number generators' seeds for consistency
 SEED = 100
 numpy.random.seed(SEED)
-
-def numpy_floatX(data):
-    return numpy.asarray(data, dtype=theano.config.floatX)
 
 def step(*args):
     #global n_input, n_hidden
@@ -99,151 +98,7 @@ def purelin(*args):
     for j in xrange(1,n_segment_h):
         y += T.dot(W_out[j],h[j]) + b_out[j]
 
-    return T.tanh(y)
-
-def extend_kalman_train(W, y_hat, dim_y_hat, y, x):
-    '''
-    P: 状态对应的协方差矩阵
-    Qv: 观测噪声的协方差矩阵
-    Qw: 输入噪声的协方差矩阵
-    W: 需要估计的状态
-    y_hat: 系统的输出
-    dim_y_hat: y_hat 的维数
-    y: 期望的输出
-
-    注意：P, Qv, Qw, W的元素个数相同，类型均为list, 对应不同的W
-    '''
-
-    # 系数矩阵的向量化
-    dim_Wv = 0
-    W_vec = []
-    for i in numpy.arange(len(W)):
-        dim_Wv += W[i].get_value().size
-        W_vec.extend([W[i].flatten()])
-    W_vec = tuple(W_vec)
-    W_vec = T.concatenate(W_vec)  
-
-    print 'number of parameters: ',dim_Wv
-
-    P = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(10.0)  ) # 状态的协方差矩阵
-    
-    Qw = theano.shared( numpy.eye(dim_Wv) * numpy_floatX(10.0) )  # 输入噪声协方差矩阵， 
-    
-    Qv = theano.shared( numpy.eye(dim_y_hat) * numpy_floatX(0.01) )  # 观测噪声协方差矩阵
-
-    # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
-    B = []
-    for _W in W:
-        J, updates = theano.scan(lambda i, y_hat, W: T.grad(y_hat[i], _W).flatten(), 
-                                 sequences=T.arange(y_hat.shape[0]), 
-                                 non_sequences=[y_hat, _W])
-        B.extend([J])
-
-    B = T.concatenate(tuple(B),axis=1)
-
-    # 计算残差
-    a = y - y_hat # 单步预测误差
-
-    # 计算增益矩阵
-    G = T.dot(T.dot(P,B.T), T.nlinalg.matrix_inverse(T.dot(T.dot(B,P),B.T)+Qv)) 
-
-    # 计算新的状态
-    update_W_vec = W_vec  +  T.dot(a,G.T) #(T.dot(G, a)).T
-
-    # 计算新的状态协方差阵
-    delta_P = -T.dot(T.dot(G,B), P) + Qw 
-    update_P = [(P, P + delta_P)] 
-
-    # 逆矢量化
-    bi = 0
-    delta_W = []
-    for i in numpy.arange(len(W)):
-        be = bi+W[i].size
-        delta_tmp = update_W_vec[bi:be]
-        delta_W.append( delta_tmp.reshape(W[i].shape) )
-        bi = be
-
-    update_W = [ (_W, _dW) for (_W, _dW) in  zip(W, delta_W) ]
-
-    update_W.extend(update_P)
-
-    update_Qw = [(Qw,  1.0 * Qw)]
-
-    update_W.extend(update_Qw)
-
-    f_train = theano.function([x, y], T.dot(a, a.T), updates=update_W,
-                                    name='EKF_f_train',
-                                    mode=compile_mode,
-                                    givens=[(H, h_init)],
-                                    on_unused_input='warn')
-
-    return f_train, P
-
-def adadelta(lr, tparams, grads, x, x_mask, y, cost):
-    """
-    An adaptive learning rate optimizer
-
-    Parameters
-    ----------
-    lr : Theano SharedVariable
-        Initial learning rate
-    tpramas: Theano SharedVariable
-        Model parameters
-    grads: Theano variable
-        Gradients of cost w.r.t to parameres
-    x: Theano variable
-        Model inputs
-    mask: Theano variable
-        Sequence mask
-    y: Theano variable
-        Targets
-    cost: Theano variable
-        Objective fucntion to minimize
-
-    Notes
-    -----
-    For more information, see [ADADELTA]_.
-
-    .. [ADADELTA] Matthew D. Zeiler, *ADADELTA: An Adaptive Learning
-       Rate Method*, arXiv:1212.5701.
-    """
-
-    zipped_grads = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                  name='%s_grad' % k)
-                    for k, p in tparams.iteritems()]
-    running_up2 = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                 name='%s_rup2' % k)
-                   for k, p in tparams.iteritems()]
-    running_grads2 = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                    name='%s_rgrad2' % k)
-                      for k, p in tparams.iteritems()]
-
-    zgup = [(zg, g) for zg, g in zip(zipped_grads, grads)]
-    rg2up = [(rg2, 0.95 * rg2 + 0.05 * (g ** 2))
-             for rg2, g in zip(running_grads2, grads)]
-                 
-    updates_1 = zgup + rg2up
-
-    f_grad_shared = theano.function([x, x_mask, y], cost, updates=updates_1,
-                                    name='adadelta_f_grad_shared',
-                                    mode=compile_mode)
-
-    updir = [-T.sqrt(ru2 + 1e-6) / T.sqrt(rg2 + 1e-6) * zg
-             for zg, ru2, rg2 in zip(zipped_grads,
-                                     running_up2,
-                                     running_grads2)]
-    ru2up = [(ru2, 0.95 * ru2 + 0.05 * (ud ** 2))
-             for ru2, ud in zip(running_up2, updir)]
-    param_up = [(p, p + ud) for p, ud in zip(tparams.values(), updir)]
-    
-    updates_2 = ru2up + param_up;
-
-    f_update = theano.function([lr], [], updates=updates_2,
-                               on_unused_input='ignore',
-                               name='adadelta_f_update',
-                               mode=compile_mode)
-
-    return updates_1, updates_2,f_grad_shared, f_update    
+    return y # T.tanh(y)
 
 def  gen_random_mask(sampleNum,n_segment_h):
     data_mask = numpy.zeros((sampleNum,n_segment_h), dtype=numpy.bool)
@@ -268,7 +123,7 @@ def prepare_data(data_x, data_mask, data_y):
     将数据分为训练集，验证集和测试集
     '''
     data_len = len(data_y)
-    train_end = numpy.floor(data_len * 0.6)
+    train_end = numpy.floor(data_len * 0.5)
     valid_end = numpy.floor(data_len * 0.8)
 
     train_data_x = data_x[:train_end]
@@ -289,102 +144,28 @@ def prepare_data(data_x, data_mask, data_y):
 
     return train_data, valid_data, test_data 
 
-def get_minibatches_idx(n, minibatch_size, overhead, shuffle=False):
-    """
-    对总的时间序列进行切片
-    n : 序列的总长度 
-    minibatch_size : 切片的序列长度
-    overhead : x 映射到y 时的延时长度
-    shuffle : 是否进行重排。 对于时间序列，原始数据不能重排，
-    """
-
-    idx_list = numpy.arange(n, dtype="int32")
-
-    minibatches = []
-    minibatch_start = 0
-    end_index = n - overhead
-    for i in range(end_index // minibatch_size):
-        minibatches.append(idx_list[minibatch_start:
-                                    minibatch_start + minibatch_size + overhead])
-        minibatch_start += minibatch_size
-
-    if (minibatch_start != end_index):
-        # Make a minibatch out of what is left
-        minibatches.append(idx_list[minibatch_start:])
-
-    if shuffle:
-        numpy.random.shuffle(minibatches)
-
-    return zip(range(len(minibatches)), minibatches)
-
-def extend_kalman_train(W, y_hat, y, x, x_mask):
-    '''
-    P: 状态对应的协方差矩阵
-    Qv: 观测噪声的协方差矩阵
-    Qw: 输入噪声的协方差矩阵
-    W: 需要估计的状态
-    y_hat: 系统的输出
-    y: 期望的输出
-
-    注意：P, Qv, Qw, W的元素个数相同，类型均为list, 对应不同的W
-    '''
-
-    # 初始值
-    P = [theano.shared( numpy.eye(p.get_value().shape[0])*numpy_floatX(1.0)  ) for p in W]
-    Qv = [theano.shared( numpy.eye(p.get_value().shape[0])*numpy_floatX(1.0)  ) for p in W]
-    Qw = [theano.shared( numpy.eye(p.get_value().shape[0])*numpy_floatX(1.0)  ) for p in W]
-
-
-    # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
-    B = []
-    for _W in W:
-        J, updates = theano.scan(lambda i, y_hat,W: T.grad(y_hat[i], _W), 
-                                 sequences=T.arange(y_hat.shape[0]), 
-                                 non_sequences=[y_hat, _W])
-        B.extend([J])
-
-    # 计算残差
-    a = y - y_hat
-
-    # 计算增益矩阵
-    G = [_P * _B.T * (_B * _P * _B.T + _Qv) for (_P,_B,_Qv) in zip(P,B,Qv)]
-
-    # 计算新的状态
-    update_W = [(_W, _W + _G * a.T ) for (_G, _W) in zip(G,W)]
-
-    # 计算新的状态协方差阵
-    update_P = [ (_P, _P - _G * _B * _P + _Qw) for (_P, _B, _Qw) in zip(P,B,Qw) ]
-
-    update_W.extend(update_P)
-
-
-    f_train = theano.function([x, x_mask, y], y_hat, updates=update_W,
-                                    name='EKF_f_train',
-                                    mode=compile_mode)
-
-    return f_train
-
-   
-
 '''
 主程序
 '''
 # 设置网络参数
-n_input = 15      # 输入数据的长度
-n_hidden = 15
-n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
-n_segment_x = 5   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
+n_input = 7      # 输入数据的长度
+n_hidden = 7
+n_segment_h = 1   # 隐层单元进行分块的块数，需保证整除
+n_segment_x = 1   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
 n_epochs = 1
 
 dtype=theano.config.floatX
 
-theano.config.exception_verbosity = 'low'
+theano.config.exception_verbosity = 'high'
 
 # 加要处理的数据
 g = DG.Generator()
 data_x,data_y = g.get_data('mackey_glass')
+N = data_y.shape[0]
+
+# sampleNum = 400-n_input
 
 data_mask = gen_random_mask(N,n_segment_h)
 print 'data_mask:', data_mask.shape
@@ -394,9 +175,9 @@ train_data, valid_data, test_data = prepare_data(data_x, data_mask, data_y)
 
 ###########################################################
 # 构造网络
-x_in = T.vector()   # 输入向量,第1维是时间
+x = T.vector()      # 输入向量,第1维是时间
 x_mask = T.matrix()
-y_out = T.vector()  # 输出向量
+t = T.vector()      # 输出向量
     
 
 h_init = [theano.shared(numpy.zeros((n_hidden/n_segment_h,), dtype=dtype), 
@@ -428,7 +209,7 @@ start_compile_time = time.clock()
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
-                        sequences=[dict(input=x_in, taps=input_taps), x_mask],  # 从输出值中延时-1抽取
+                        sequences=[dict(input=x, taps=input_taps), x_mask],  # 从输出值中延时-1抽取
                         outputs_info=h_init,   # taps = [-1], default
                         non_sequences=params)
 
@@ -440,10 +221,8 @@ params_1.extend(W_out)
 params_1.extend(b_out)                        
 y,updates = theano.scan(purelin,
                         sequences=h_tmp,
-                        non_sequences=params_1)
+                        non_sequences=params_1)               
 y = T.flatten(y)                    
-                        
-cost = ((y_out[n_input-1:]-y)**2).sum()
 
 params4grad = []
 
@@ -460,98 +239,101 @@ for i in xrange(n_segment_h):
 params4grad.extend(W_out)   
 params4grad.extend(b_out)
 
-f_train =  extend_kalman_train(params4grad, y, y_out, x_in, x_mask)
 
-# # 编译表达式
-# grads = theano.tensor.grad(cost, wrt=params4grad)
-# tparams = OrderedDict()
-# for p in params4grad:
-#     tparams[p.name] = p   
-
-# lr_v = 0.0001
-# lr_ada = theano.tensor.scalar(name='lr_ada')
-
-# f_pred = theano.function([x_in, x_mask], outputs=y)
-# pred_cost = theano.function([x_in, x_mask, y_out], outputs=cost)  
-
-# updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, x_mask, y_out, cost)
+batch_size = 2
+update_W, P, cost = DG.PublicFunction.extend_kalman_train(params4grad, y, batch_size, t) 
+f_train = theano.function([x, x_mask, t], cost, updates=update_W,
+                                name='EKF_f_train',
+                                mode=compile_mode,
+                                on_unused_input='warn')  
 
 
-# ######################################
-# # train
-# print 'train info:', train_data[0].shape, train_data[1].shape, train_data[2].shape
-# print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].shape
-# print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
-# history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
-# history_errs_cur_index = 0
-# patience = n_epochs
-# valid_fre = 1
-# bad_counter = 0
+sim_fn = theano.function([x, x_mask], outputs=y)
+pred_cost = theano.function([x, x_mask, t], outputs=cost) 
 
-# overhead = n_input - 1 
-# batch_size = 20   #设置的足够大时，等价于GD
+######################################
+# train
+print 'train info:', train_data[0].shape, train_data[1].shape, train_data[2].shape
+print 'valid info:', valid_data[0].shape, valid_data[1].shape, valid_data[2].shape
+print 'test info:', test_data[0].shape, test_data[1].shape, test_data[2].shape
+history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
+history_errs_cur_index = 0
+patience = 3
+valid_fre = 1
+bad_counter = 0
 
-# start_time = time.clock()   
-# for epochs_index in xrange(n_epochs) :  
+start_time = time.clock()   
+for epochs_index in xrange(n_epochs) :  
 
-#     kf = get_minibatches_idx(len(train_data[0]), batch_size, overhead, shuffle=True)
+    kf = DG.DataPrepare.get_seq_minibatches_idx(train_data[2].shape[0], batch_size, n_input, shuffle=False)
 
-#     for batch_index, train_index in kf:
-#         _x = [train_data[0][t]for t in train_index]
-#         _mask = [train_data[1][t]for t in train_index]
-#         _y = [train_data[2][t]for t in train_index]
+    for batch_index, train_index in kf:
+        sub_seq = train_data[2][train_index] 
+        _mask = copy.deepcopy(train_data[1][train_index])
+        _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
+        _mask = _mask[:-1]
+        train_err = f_train(_x, _mask, _y)
+        print '{}.{}: train error={:.3f}'.format(epochs_index, batch_index, float(train_err))
+
+    if numpy.mod(epochs_index+1, valid_fre) == 0:    
+        valid_err = pred_cost(valid_data[0][:-1], valid_data[1][:-1], valid_data[2][n_input:])
+        test_err = pred_cost(test_data[0][:-1], test_data[1][:-1], test_data[2][n_input:])
+
+        print '{}: train error={:.3f}, valid error={:.3f}, test error={:.3f}'.format(
+            epochs_index, float(train_err), float(valid_err), float(test_err))
+
+        history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
+        history_errs_cur_index += 1
+
+        if valid_err <= history_errs[:history_errs_cur_index,1].min():
+            bad_counter = 0
+
+        if history_errs_cur_index > patience and  valid_err >= history_errs[:history_errs_cur_index-patience,1].min():
+            bad_counter += 1
+            if bad_counter > patience:
+                print 'Early Stop!'
+                break
+
+# 使用Valid Data测试多步预测误差
+x_train_end = copy.deepcopy(train_data[0][-n_input:]) 
+x_train_mask_end = train_data[1][-1]
+
+n_predict = 200
+y_predict = numpy.zeros((n_predict,))
+for i in numpy.arange(n_predict):
+    x_train_mask_end.resize((1,x_train_mask_end.shape[0]))
+    y_predict[i] = sim_fn(x_train_end,x_train_mask_end)
+    x_train_end[:-1] = x_train_end[1:]
+    x_train_end[-1] = y_predict[i]
+    x_train_mask_end = valid_data[1][i]
+
+plt.figure(3)
+plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
+plt.plot(numpy.arange(valid_data[2].shape[0]), valid_data[2],'g')
 
 
-#         train_err = f_grad_shared(_x, _mask, _y)
-#         f_update(lr_v)
+y_sim = sim_fn(data_x[:-1], data_mask[:-1])
+y_sim_index = numpy.arange(n_input, data_x.shape[0]) 
+print y_sim.shape
 
-#         #print '{}:{} train_batch error={:.3f}'.format(epochs_index, batch_index, float(train_err))
+plt.figure(1)
+index_start = data_x.shape[0]-y_sim.shape[0]
+index_train_end = train_data[0].shape[0]
+index_valid_end = index_train_end + valid_data[0].shape[0]
+index_test_end = index_valid_end + test_data[0].shape[0]
+plt.plot( range(index_start, index_train_end),     y_sim[:index_train_end-index_start], 'r')
+plt.plot( range(index_train_end, index_valid_end), y_sim[index_train_end-index_start:index_valid_end-index_start], 'g')
+plt.plot( range(index_valid_end, index_test_end),  y_sim[index_valid_end-index_start:index_test_end-index_start], 'b')
 
-#     if numpy.mod(epochs_index+1, valid_fre) == 0:    
-#         valid_err = pred_cost(valid_data[0], valid_data[1], valid_data[2])
-#         test_err = pred_cost(test_data[0], test_data[1], test_data[2])
+plt.plot( range(data_y.shape[0]), data_y,'k')
 
-#         print '{}: train error={:.3f}, valid error={:.3f}, test error={:.3f}'.format(
-#             epochs_index, float(train_err), float(valid_err), float(test_err))
-
-#         history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
-#         history_errs_cur_index += 1
-
-#         if valid_err <= history_errs[:history_errs_cur_index,1].min():
-#             bad_counter = 0
-
-#         if history_errs_cur_index > patience and  valid_err >= history_errs[:history_errs_cur_index-patience,1].min():
-#             bad_counter += 1
-#             if bad_counter > patience:
-#                 print 'Early Stop!'
-#                 break
-  
-
-# y_sim = f_pred(data_x, data_mask) 
-
-# print y_sim.shape
-
-# index_start = data_x.shape[0]-y_sim.shape[0]
-# index_train_end = train_data[0].shape[0]
-# index_valid_end = index_train_end + valid_data[0].shape[0]
-# index_test_end = index_valid_end + test_data[0].shape[0]
-
-# plt.figure(1)
-
-# plt.plot( range(index_start, index_train_end),     y_sim[:index_train_end-index_start], 'r')
-# plt.plot( range(index_train_end, index_valid_end), y_sim[index_train_end-index_start:index_valid_end-index_start], 'g')
-# plt.plot( range(index_valid_end, index_test_end),  y_sim[index_valid_end-index_start:index_test_end-index_start], 'b')
-
-# plt.plot( range(data_x.shape[0]), data_x,'b.')
-# plt.plot( range(data_y.shape[0]), data_y,'k')
-
-# plt.figure(2)
-# plt.plot( range(history_errs_cur_index),  history_errs[:,0], 'r')
-# plt.plot( range(history_errs_cur_index),  history_errs[:,1], 'g')
-# plt.plot( range(history_errs_cur_index),  history_errs[:,2], 'b')
-# plt.show()
+plt.figure(2)
+plt.plot( range(history_errs_cur_index),  history_errs[:history_errs_cur_index,0], 'r')
+plt.plot( range(history_errs_cur_index),  history_errs[:history_errs_cur_index,1], 'g')
+plt.plot( range(history_errs_cur_index),  history_errs[:history_errs_cur_index,2], 'b')
+plt.show()
                           
-# print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)
+print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)
         
 print "finished!"
 

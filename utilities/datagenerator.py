@@ -1,7 +1,171 @@
 # -*- coding: utf-8 -*-
 
 import numpy
+import theano
+import theano.tensor as T
 import matplotlib.pyplot as plt
+
+class PublicFunction(object):
+    
+    @staticmethod
+    def numpy_floatX(data):
+        '''
+        numpy数据类型和theano统一
+        '''
+        return numpy.asarray(data, dtype=theano.config.floatX)
+
+    @staticmethod
+    def data_get_data_x_y(seq_data, overhead):
+        '''
+        按照延时嵌入定理将seq_data加工成输入序列和输出序列
+        overall为输入的维数
+        '''
+        data_x = seq_data[:-1]        # 最后一个不参与
+        data_y = seq_data[overhead:]
+        return data_x, data_y
+
+    @staticmethod
+    def adadelta(lr, tparams, grads, v, cost):
+        """
+        An adaptive learning rate optimizer
+
+        Parameters
+        ----------
+        lr : Theano SharedVariable
+            Initial learning rate
+        tpramas: Theano SharedVariable
+            Model parameters
+        grads: Theano variable
+            Gradients of cost w.r.t to parameres
+        x: Theano variable
+            Model inputs
+        mask: Theano variable
+            Sequence mask
+        y: Theano variable
+            Targets
+        v: Theano variable list. eg: [x,y]
+        cost: Theano variable
+            Objective fucntion to minimize
+
+        Notes
+        -----
+        For more information, see [ADADELTA]_.
+
+        .. [ADADELTA] Matthew D. Zeiler, *ADADELTA: An Adaptive Learning
+           Rate Method*, arXiv:1212.5701.
+        """
+
+        zipped_grads = [theano.shared(p.get_value() * PublicFunction.numpy_floatX(0.),
+                                      name='%s_grad' % k)
+                        for k, p in tparams.iteritems()]
+        running_up2 = [theano.shared(p.get_value() * PublicFunction.numpy_floatX(0.),
+                                     name='%s_rup2' % k)
+                       for k, p in tparams.iteritems()]
+        running_grads2 = [theano.shared(p.get_value() * PublicFunction.numpy_floatX(0.),
+                                        name='%s_rgrad2' % k)
+                          for k, p in tparams.iteritems()]
+
+        zgup = [(zg, g) for zg, g in zip(zipped_grads, grads)]
+        rg2up = [(rg2, 0.95 * rg2 + 0.05 * (g ** 2))
+                 for rg2, g in zip(running_grads2, grads)]
+                     
+        updates_1 = zgup + rg2up
+
+        f_grad_shared = theano.function(v, cost, updates=updates_1,
+                                        name='adadelta_f_grad_shared',
+                                        mode='FAST_RUN')
+
+        updir = [-T.sqrt(ru2 + 1e-6) / T.sqrt(rg2 + 1e-6) * zg
+                 for zg, ru2, rg2 in zip(zipped_grads,
+                                         running_up2,
+                                         running_grads2)]
+        ru2up = [(ru2, 0.95 * ru2 + 0.05 * (ud ** 2))
+                 for ru2, ud in zip(running_up2, updir)]
+        param_up = [(p, p + ud) for p, ud in zip(tparams.values(), updir)]
+        
+        updates_2 = ru2up + param_up;
+
+        f_update = theano.function([lr], [], updates=updates_2,
+                                   on_unused_input='ignore',
+                                   name='adadelta_f_update',
+                                   mode='FAST_RUN')
+
+        return updates_1, updates_2,f_grad_shared, f_update 
+
+    @staticmethod
+    def extend_kalman_train(W, y_hat, dim_y_hat, y):
+        '''
+        P: 状态对应的协方差矩阵
+        Qv: 观测噪声的协方差矩阵
+        Qw: 输入噪声的协方差矩阵
+        W: 需要估计的状态
+        y_hat: 系统的输出
+        dim_y_hat: y_hat 的维数
+        y: 期望的输出
+
+        注意：P, Qv, Qw, W的元素个数相同，类型均为list, 对应不同的W
+        '''
+
+        # 系数矩阵的向量化
+        dim_Wv = 0
+        W_vec = []
+        for i in numpy.arange(len(W)):
+            dim_Wv += W[i].get_value().size
+            W_vec.extend([W[i].flatten()])
+        W_vec = tuple(W_vec)
+        W_vec = T.concatenate(W_vec)  
+
+        print 'number of parameters: ',dim_Wv
+
+        P = theano.shared( numpy.eye(dim_Wv) * PublicFunction.numpy_floatX(10.0) ) # 状态的协方差矩阵
+        
+        Qw = theano.shared( numpy.eye(dim_Wv) * PublicFunction.numpy_floatX(10.0) )  # 输入噪声协方差矩阵， 
+        
+        Qv = theano.shared( numpy.eye(dim_y_hat) * PublicFunction.numpy_floatX(0.01) )  # 观测噪声协方差矩阵
+
+        # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
+        B = []
+        for _W in W:
+            J, updates = theano.scan(lambda i, y_hat, W: T.grad(y_hat[i], _W).flatten(), 
+                                     sequences=T.arange(y_hat.shape[0]), 
+                                     non_sequences=[y_hat, _W])
+            B.extend([J])
+
+        B = T.concatenate(tuple(B),axis=1)
+
+        # 计算残差
+        a = y - y_hat # 单步预测误差
+
+        # 计算增益矩阵
+        G = T.dot(T.dot(P,B.T), T.nlinalg.matrix_inverse(T.dot(T.dot(B,P),B.T)+Qv)) 
+
+        # 计算新的状态
+        update_W_vec = W_vec  +  T.dot(a,G.T) #(T.dot(G, a)).T
+
+        # 计算新的状态协方差阵
+        delta_P = -T.dot(T.dot(G,B), P) + Qw 
+        update_P = [(P, P + delta_P)] 
+
+        # 逆矢量化
+        bi = 0
+        delta_W = []
+        for i in numpy.arange(len(W)):
+            be = bi+W[i].size
+            delta_tmp = update_W_vec[bi:be]
+            delta_W.append( delta_tmp.reshape(W[i].shape) )
+            bi = be
+
+        update_W = [ (_W, _dW) for (_W, _dW) in  zip(W, delta_W) ]
+
+        update_W.extend(update_P)
+
+        update_Qw = [(Qw,  1.0 * Qw)]
+
+        update_W.extend(update_Qw)
+
+        cost = T.dot(a, a.T)
+
+        return update_W, P, cost
 
 class DataPrepare(object):
     @staticmethod

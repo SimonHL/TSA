@@ -13,8 +13,8 @@ import theano.tensor as T
 import matplotlib.pyplot as plt
 from collections import OrderedDict
 
-def numpy_floatX(data):
-    return numpy.asarray(data, dtype=theano.config.floatX)
+import utilities.datagenerator as DG
+reload(DG)
 
 def step(*args):
     #global n_input, n_hidden
@@ -85,72 +85,7 @@ def purelin(*args):
         y += T.dot(W_out[j],h[j]) + b_out[j]
 
     return T.tanh(y)
-
-def adadelta(lr, tparams, grads, x, y, cost):
-    """
-    An adaptive learning rate optimizer
-
-    Parameters
-    ----------
-    lr : Theano SharedVariable
-        Initial learning rate
-    tpramas: Theano SharedVariable
-        Model parameters
-    grads: Theano variable
-        Gradients of cost w.r.t to parameres
-    x: Theano variable
-        Model inputs
-    mask: Theano variable
-        Sequence mask
-    y: Theano variable
-        Targets
-    cost: Theano variable
-        Objective fucntion to minimize
-
-    Notes
-    -----
-    For more information, see [ADADELTA]_.
-
-    .. [ADADELTA] Matthew D. Zeiler, *ADADELTA: An Adaptive Learning
-       Rate Method*, arXiv:1212.5701.
-    """
-
-    zipped_grads = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                  name='%s_grad' % k)
-                    for k, p in tparams.iteritems()]
-    running_up2 = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                 name='%s_rup2' % k)
-                   for k, p in tparams.iteritems()]
-    running_grads2 = [theano.shared(p.get_value() * numpy_floatX(0.),
-                                    name='%s_rgrad2' % k)
-                      for k, p in tparams.iteritems()]
-
-    zgup = [(zg, g) for zg, g in zip(zipped_grads, grads)]
-    rg2up = [(rg2, 0.95 * rg2 + 0.05 * (g ** 2))
-             for rg2, g in zip(running_grads2, grads)]
-                 
-    updates_1 = zgup + rg2up
-
-    f_grad_shared = theano.function([x, y], cost, updates=updates_1,
-                                    name='adadelta_f_grad_shared',
-                                    mode='FAST_COMPILE')
-
-    updir = [-T.sqrt(ru2 + 1e-6) / T.sqrt(rg2 + 1e-6) * zg
-             for zg, ru2, rg2 in zip(zipped_grads,
-                                     running_up2,
-                                     running_grads2)]
-    ru2up = [(ru2, 0.95 * ru2 + 0.05 * (ud ** 2))
-             for ru2, ud in zip(running_up2, updir)]
-    param_up = [(p, p + ud) for p, ud in zip(tparams.values(), updir)]
-    
-    updates_2 = ru2up + param_up;
-
-    f_update = theano.function([lr], [], updates=updates_2,
-                               on_unused_input='ignore',
-                               name='adadelta_f_update',
-                               mode='FAST_COMPILE')
-
-    return updates_1, updates_2,f_grad_shared, f_update    
+  
     
 # 设置网络参数
 n_input = 6
@@ -248,7 +183,7 @@ lr_ada = theano.tensor.scalar(name='lr_ada')
 f_pred = theano.function([x_in],                             
                          outputs=y)  
 
-updates_1, updates_2, f_grad_shared, f_update = adadelta(lr_ada, tparams, grads, x_in, y_out, cost)
+updates_1, updates_2, f_grad_shared, f_update = DG.PublicFunction.adadelta(lr_ada, tparams, grads, [x_in, y_out], cost)
 
 start_time = time.clock()   
 for epochs_index in xrange(n_epochs) :  
