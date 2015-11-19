@@ -86,14 +86,29 @@ def extend_kalman_train(W, y_hat, dim_y_hat, y, x):
     Qv = theano.shared( numpy.eye(dim_y_hat) * numpy_floatX(0.01) )  # 观测噪声协方差矩阵
 
     # 求线性化的B矩阵: 系统输出y_hat对状态的一阶导数
-    B = []
-    for _W in W:
-        J, updates = theano.scan(lambda i, y_hat, W: T.grad(y_hat[i], _W).flatten(), 
-                                 sequences=T.arange(y_hat.shape[0]), 
-                                 non_sequences=[y_hat, _W])
-        B.extend([J])
 
-    B = T.concatenate(tuple(B),axis=1)
+    params = []
+    params.extend([y_hat])
+    params.extend(W)
+
+    def _step(*args):
+        print 'step args: ', args
+        i = args[0]
+        y_hat = args[1]
+        params = args[2:]
+
+        grads = T.grad(y_hat[i], params)
+
+        tmp=[]
+        for _g in grads:
+            tmp.append(_g.flatten())
+        return tmp
+
+    B, updates = theano.scan(_step, 
+                            sequences=T.arange(y_hat.shape[0]), 
+                            non_sequences=params)
+
+    B = T.concatenate(B,axis=1)
 
     # 计算残差
     a = y - y_hat # 单步预测误差

@@ -148,13 +148,13 @@ def prepare_data(data_x, data_mask, data_y):
 主程序
 '''
 # 设置网络参数
-n_input = 7      # 输入数据的长度
-n_hidden = 7
-n_segment_h = 1   # 隐层单元进行分块的块数，需保证整除
-n_segment_x = 1   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
+n_input = 15      # 输入数据的长度
+n_hidden = 15
+n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
+n_segment_x = 5   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
-n_epochs = 1
+n_epochs = 2
 
 dtype=theano.config.floatX
 
