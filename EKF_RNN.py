@@ -55,7 +55,7 @@ def purelin(*args):
     
 # 设置网络参数
 n_input = 7
-n_hidden = 5
+n_hidden = 15
 n_output = 1
 n_epochs = 3
 
@@ -145,16 +145,24 @@ for epochs_index in xrange(n_epochs) :
         print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err) 
 x_train_end = train_data[-n_input:] 
 
-n_predict = 200
+n_predict = 100
 y_predict = numpy.zeros((n_predict,))
+cumulative_error = 0
+cumulative_error_list = numpy.zeros((n_predict,))
 for i in numpy.arange(n_predict):
     y_predict[i] = sim_fn(x_train_end)
     x_train_end[:-1] = x_train_end[1:]
     x_train_end[-1] = y_predict[i]
+    cumulative_error += numpy.abs(y_predict[i] - test_data[i])
+    cumulative_error_list[i] = cumulative_error
+plt.figure(3)
+plt.plot(numpy.arange(n_predict), cumulative_error_list)
+plt.title('cumulative error')
+plt.grid(True)
 
 plt.figure(1)
 plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
-plt.plot(numpy.arange(test_data.shape[0]), test_data,'g')
+plt.plot(numpy.arange(300), test_data[:300],'g')
 
 y_sim = sim_fn(data_x[:-1])  # 整体的单步误差
 print 'y_sim.shape: ', y_sim.shape

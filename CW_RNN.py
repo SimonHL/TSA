@@ -16,8 +16,8 @@ from collections import OrderedDict
 import utilities.datagenerator as DG
 reload(DG)
 
-# compile_mode = 'FAST_COMPILE'
-compile_mode = 'FAST_RUN'
+compile_mode = 'FAST_COMPILE'
+# compile_mode = 'FAST_RUN'
 
 # Set the random number generators' seeds for consistency
 SEED = 100

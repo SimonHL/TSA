@@ -41,21 +41,42 @@ def step(*args):
   
     return T.tanh(h)
     
-def purelin(*args):
+def purelin_ex(*args):
     print args
-    h = args[0]
-    W_in =  [args[u] for u in xrange(1, n_input + 1)]
-    b_in = args[n_input + 1]
-    W_hid = args[n_input + 2]
-    W_out = args[n_input + 3]
-    b_out = args[n_input + 4]
+    args_index = 0
+    x =  [args[u] for u in xrange(n_input)] 
+    args_index += n_input
 
-    y = T.dot(h,W_out) + b_out
+    h = args[args_index]
+    args_index += 1
+
+    W_in =  [args[u] for u in xrange(args_index, n_input + args_index)]
+    args_index += n_input
+
+    b_in = args[args_index]
+    args_index += 1
+    W_hid = args[args_index]
+    args_index += 1
+
+    # W_out_ex =  [args[u] for u in xrange(args_index, n_input + args_index)]
+    # args_index += n_input
+
+    W_out = args[args_index]
+    args_index += 1
+
+    b_out = args[args_index]
+
+    # y = T.dot(x[0], W_out_ex[0])
+    # for j in xrange(1, n_input):           # 前向部分
+    #     y +=  T.dot(x[j], W_out_ex[j])
+
+    y = T.dot(h,W_out) + b_out 
+
     return y #T.tanh(y)
     
 # 设置网络参数
 n_input = 7
-n_hidden = 5
+n_hidden = 15
 n_output = 1
 n_epochs = 3
 
@@ -95,6 +116,10 @@ b_in = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name="b_in")
 W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, n_hidden), low= -0.01, high=0.01).astype(dtype), name='W_hid') 
 
 W_out = theano.shared(numpy.random.uniform(size=(n_hidden,n_output),low=-0.01,high=0.01).astype(dtype),name="W_out")
+
+# 从输入直接引入的部分
+W_out_ex = [theano.shared(numpy.random.uniform(size=(1, n_output), low= -0.01, high=0.01).astype(dtype), 
+                      name='W_out_ex' + str(u)) for u in range(n_input)] 
 b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
 
 params = []
@@ -106,33 +131,34 @@ input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
                         sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
-                        outputs_info=h_init,
+                        outputs_info=dict(initial = H, taps=output_taps),
                         non_sequences=params)
-params.extend([W_out])   
+# params.extend(W_out_ex)
+params.extend([W_out])
 params.extend([b_out])                        
-y,updates = theano.scan(purelin,
-                        sequences=h_tmp,
+y,updates = theano.scan(purelin_ex,
+                        sequences=[dict(input=x_in, taps=input_taps), h_tmp], # 从输出值中延时-1抽取
                         non_sequences=params)
-y = T.flatten(y)                    
-                        
-                        
-cost = ((y_out-y)**2).sum()
+y = T.flatten(y)
 
-batch_size = 200    # 设置的足够大时，等价于GD
+batch_size = 3    # 设置的足够大时，等价于GD
 
 print 'Batch Size: ', batch_size 
-grads = theano.tensor.grad(cost, wrt=params)
-tparams = OrderedDict()
-for p in params:
-    tparams[p.name] = p   
 
-lr_v = 0.0001
-lr_ada = theano.tensor.scalar(name='lr_ada')
+update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, y, batch_size, y_out)
 
-updates_1, updates_2, f_grad_shared, f_update = DG.PublicFunction.adadelta(lr_ada, tparams, grads, [x_in, y_out], cost)
+f_train = theano.function([x_in, y_out], cost, updates=update_W,
+                                name='EKF_f_train',
+                                mode=compile_mode,
+                                givens=[(H, h_init)],
+                                on_unused_input='warn')
 
-sim_fn = theano.function([x_in],outputs=y)  
-start_time = time.clock() 
+                                                    
+
+sim_fn = theano.function([x_in], outputs=y, givens=[(H, h_init)])
+
+    
+start_time = time.clock()     
 
 for epochs_index in xrange(n_epochs) :  
 
@@ -141,21 +167,28 @@ for epochs_index in xrange(n_epochs) :
     for batch_index, train_index in kf:
         sub_seq = train_data[train_index] 
         _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
-        train_err = f_grad_shared(_x, _y)
-        f_update(lr_v)
-        print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err)
-
+        train_err = f_train(_x, _y)
+        print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err) 
 x_train_end = train_data[-n_input:] 
-n_predict = 200
+
+n_predict = 100
 y_predict = numpy.zeros((n_predict,))
+cumulative_error = 0
+cumulative_error_list = numpy.zeros((n_predict,))
 for i in numpy.arange(n_predict):
     y_predict[i] = sim_fn(x_train_end)
     x_train_end[:-1] = x_train_end[1:]
     x_train_end[-1] = y_predict[i]
+    cumulative_error += numpy.abs(y_predict[i] - test_data[i])
+    cumulative_error_list[i] = cumulative_error
+plt.figure(3)
+plt.plot(numpy.arange(n_predict), cumulative_error_list)
+plt.title('cumulative error')
+plt.grid(True)
 
 plt.figure(1)
 plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
-plt.plot(numpy.arange(test_data.shape[0]), test_data,'g')
+plt.plot(numpy.arange(300), test_data[:300],'g')
 
 y_sim = sim_fn(data_x[:-1])  # 整体的单步误差
 print 'y_sim.shape: ', y_sim.shape

@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
-"""
-使用Elman网络（简单局部回归网络）
 
-@author: simon
-"""
-import sys,time
+from collections import OrderedDict
 import numpy
 import theano
 import theano.tensor as T
+import time
+import sys
 import matplotlib.pyplot as plt
-from collections import OrderedDict
 
 import utilities.datagenerator as DG
 reload(DG)
@@ -21,38 +18,54 @@ compile_mode = 'FAST_COMPILE'
 SEED = 100
 numpy.random.seed(SEED)
 
-def step(*args):
-    #global n_input, n_hidden 
-    print args
-    x =  [args[u] for u in xrange(n_input)] 
-    hid_taps = args[n_input]  
-    
-    W_in =  [args[u] for u in xrange(n_input + 1, n_input * 2 + 1)]
-    b_in = args[n_input * 2 + 1]
-    W_hid = args[n_input * 2 + 2]
-    
-    
-    h = T.dot(x[0], W_in[0])
-    for j in xrange(1, n_input):           # 前向部分
-        h +=  T.dot(x[j], W_in[j])
-    
-    h += T.dot(hid_taps, W_hid)            # 回归部分
-    h += b_in                              # 偏置部分
-  
-    return T.tanh(h)
-    
-def purelin(*args):
-    print args
-    h = args[0]
-    W_in =  [args[u] for u in xrange(1, n_input + 1)]
-    b_in = args[n_input + 1]
-    W_hid = args[n_input + 2]
-    W_out = args[n_input + 3]
-    b_out = args[n_input + 4]
+def lstm_layer(n_input, n_LSTM, x):
+    '''
+    i f o c 统一处理
+    '''
+    def _slice(_x, n, dim):
+        if _x.ndim == 3:
+            return _x[:, :, n * dim:(n + 1) * dim]
+        return _x[:, n * dim:(n + 1) * dim]
 
-    y = T.dot(h,W_out) + b_out
-    return y #T.tanh(y)
+    def _step(*args):
+        '''
+        x_ : 延时输入的x
+        h_ : 前一时刻单元的输出
+        c_ : 前一时刻单元的Cell值
+        '''
+        
+        x =  [args[u] for u in xrange(n_input)]
+        h_ = args[n_input]
+        c_ = args[n_input+1]
+
+        preact = T.dot(x[0], W_in[0])
+        for i in xrange(1,n_input):
+            preact += T.dot(x[i], W_in[i])
+
+        preact += T.dot(h_, W_hid)  #  h的后向
+        preact += b_in   
+
+        i = T.nnet.sigmoid(_slice(preact, 0, n_LSTM)) # input gate
+        f = T.nnet.sigmoid(_slice(preact, 1, n_LSTM)) # forget gate
+        o = T.nnet.sigmoid(_slice(preact, 2, n_LSTM)) # output gate
+        c = T.tanh(_slice(preact, 3, n_LSTM))         # cell state pre   
+
+        c = f * c_ + i * c                                        # cell state
+
+        h = o * T.tanh(c)                                         # unit output
+
+        return h, c
     
+    out_h = theano.shared(numpy.zeros((1,n_LSTM), dtype=theano.config.floatX), name="out_h")
+    out_c = theano.shared(numpy.zeros((1,n_LSTM), dtype=theano.config.floatX), name="out_c")
+    
+    input_taps = range(1-n_input, 1)
+    rval, updates = theano.scan(_step,
+                                sequences=dict(input=x,taps=input_taps),
+                                outputs_info=[out_h, out_c])
+    return rval[0]   # 对外只有h
+
+
 # 设置网络参数
 n_input = 7
 n_hidden = 5
@@ -78,47 +91,37 @@ print 'test_data.shape: ', test_data.shape
 
 print 'network: n_in:{},n_hidden:{},n_out:{}'.format(n_input, n_hidden, n_output)
 
-# 构造网络
-x_in = T.vector()   # 输入向量,第1维是时间
-y_out = T.vector()  # 输出向量
-lr = T.scalar()     # 学习速率，标量
+x = T.vector()      # 输入向量,第1维是时间
+y = T.vector()  # 输出向量, 第1维是时间
 
-H = T.matrix()      # 隐单元的初始化值
-    
 
-h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
+W_in = [theano.shared(numpy.random.uniform(size=(1, 4*n_hidden), low= -0.01, high=0.01).astype(dtype), 
+                        name='W_in' + str(u)) for u in range(n_input)]                
+b_in = theano.shared(numpy.zeros((4 * n_hidden,), dtype=dtype), name="b_in")
 
-W_in = [theano.shared(numpy.random.uniform(size=(1, n_hidden), low= -0.01, high=0.01).astype(dtype), 
-                      name='W_in' + str(u)) for u in range(n_input)]                
-b_in = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name="b_in")
-
-W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, n_hidden), low= -0.01, high=0.01).astype(dtype), name='W_hid') 
+W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, 4*n_hidden), low= -0.01, high=0.01).astype(dtype), name='W_hid') 
 
 W_out = theano.shared(numpy.random.uniform(size=(n_hidden,n_output),low=-0.01,high=0.01).astype(dtype),name="W_out")
 b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
+
+h_tmp = lstm_layer(n_input, n_hidden, x)  
+  
+pred = T.dot(h_tmp, W_out) + b_out
+
+pred = theano.tensor.flatten(pred)
+
+f_pred = theano.function([x], pred, name='f_pred')
+
+cost = ((pred - y)**2).sum()
+
+batch_size = 200    # 设置的足够大时，等价于GD
 
 params = []
 params.extend(W_in)
 params.extend([b_in])
 params.extend([W_hid])
-
-input_taps = range(1-n_input, 1)
-output_taps = [-1]
-h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
-                        sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
-                        outputs_info=h_init,
-                        non_sequences=params)
 params.extend([W_out])   
-params.extend([b_out])                        
-y,updates = theano.scan(purelin,
-                        sequences=h_tmp,
-                        non_sequences=params)
-y = T.flatten(y)                    
-                        
-                        
-cost = ((y_out-y)**2).sum()
-
-batch_size = 200    # 设置的足够大时，等价于GD
+params.extend([b_out])  
 
 print 'Batch Size: ', batch_size 
 grads = theano.tensor.grad(cost, wrt=params)
@@ -129,9 +132,10 @@ for p in params:
 lr_v = 0.0001
 lr_ada = theano.tensor.scalar(name='lr_ada')
 
-updates_1, updates_2, f_grad_shared, f_update = DG.PublicFunction.adadelta(lr_ada, tparams, grads, [x_in, y_out], cost)
+updates_1, updates_2, f_grad_shared, f_update = DG.PublicFunction.adadelta(lr_ada, tparams, grads, [x, y], cost)
 
-sim_fn = theano.function([x_in],outputs=y)  
+
+sim_fn = theano.function([x],outputs=pred)  
 start_time = time.clock() 
 
 for epochs_index in xrange(n_epochs) :  
@@ -170,3 +174,9 @@ print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.
 plt.show() 
        
 print "finished!"
+
+
+
+
+
+

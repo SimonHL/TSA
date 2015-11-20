@@ -59,9 +59,8 @@ def step(*args):
     h_list = []
 
     for i in xrange(n_segment_h):
-        
-        h_tmp = T.dot(W_in[i*n_segment_x + i], x_block[i]) # 下标从i开始，可以使其成为上三角矩阵
-        for j in xrange(i+1,n_segment_x):
+        h_tmp = T.dot(W_in[i*n_segment_x + 0], x_block[0])
+        for j in xrange(1,n_segment_x):
             h_tmp += T.dot(W_in[i*n_segment_x + j], x_block[j])
         h_tmp = h_tmp + b_in[i]
         h_list.extend([h_tmp])
@@ -151,11 +150,11 @@ def prepare_data(data_x, data_mask, data_y):
 # 设置网络参数
 n_input = 7      # 输入数据的长度
 n_hidden = 15
-n_segment_h = 5   # 隐层单元进行分块的块数，需保证整除
+n_segment_h = 3   # 隐层单元进行分块的块数，需保证整除
 n_segment_x = 1   # 输入进行分块的块数，需保证整除， MaskRNN需要保证能够形成对角矩阵
 n_output = 1
 
-n_epochs = 2
+n_epochs = 3
 
 dtype=theano.config.floatX
 
@@ -227,10 +226,7 @@ y = T.flatten(y)
 
 params4grad = []
 
-# params4grad.extend(W_in)
-for i in xrange(n_segment_h):
-    for j in xrange(i,n_segment_x):
-        params4grad.extend([W_in[i*n_segment_h+j]])
+params4grad.extend(W_in)
 params4grad.extend(b_in)
 #params4grad.extend(W_hid)   #左下部分不参与计算
 for i in xrange(n_segment_h):
@@ -241,7 +237,7 @@ params4grad.extend(W_out)
 params4grad.extend(b_out)
 
 
-batch_size = 2
+batch_size = 3
 update_W, P, cost = DG.PublicFunction.extend_kalman_train(params4grad, y, batch_size, t) 
 f_train = theano.function([x, x_mask, t], cost, updates=update_W,
                                 name='EKF_f_train',
@@ -309,11 +305,12 @@ for i in numpy.arange(n_predict):
     x_train_end[:-1] = x_train_end[1:]
     x_train_end[-1] = y_predict[i]
     x_train_mask_end = valid_data[1][i]
-    cumulative_error += numpy.abs(y_predict[i] - test_data[i])
+    cumulative_error += numpy.abs(y_predict[i] - valid_data[2][i])
     cumulative_error_list[i] = cumulative_error
 plt.figure(3)
 plt.plot(numpy.arange(n_predict), cumulative_error_list)
 plt.title('cumulative error')
+plt.grid(True)
 
 plt.figure(4)
 plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
