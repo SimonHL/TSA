@@ -10,6 +10,7 @@ import theano
 import theano.tensor as T
 import matplotlib.pyplot as plt
 from collections import OrderedDict
+import copy
 
 import utilities.datagenerator as DG
 reload(DG)
@@ -25,12 +26,7 @@ def step(*args):
     #global n_input, n_hidden 
     print args
     x =  [args[u] for u in xrange(n_input)] 
-    hid_taps = args[n_input]  
-    
-    W_in =  [args[u] for u in xrange(n_input + 1, n_input * 2 + 1)]
-    b_in = args[n_input * 2 + 1]
-    W_hid = args[n_input * 2 + 2]
-    
+    hid_taps = args[n_input]    
     
     h = T.dot(x[0], W_in[0])
     for j in xrange(1, n_input):           # 前向部分
@@ -44,20 +40,15 @@ def step(*args):
 def purelin(*args):
     print args
     h = args[0]
-    W_in =  [args[u] for u in xrange(1, n_input + 1)]
-    b_in = args[n_input + 1]
-    W_hid = args[n_input + 2]
-    W_out = args[n_input + 3]
-    b_out = args[n_input + 4]
 
     y = T.dot(h,W_out) + b_out
     return y #T.tanh(y)
     
 # 设置网络参数
 n_input = 7
-n_hidden = 5
+n_hidden = 15
 n_output = 1
-n_epochs = 3
+n_epochs = 20
 
 dtype=theano.config.floatX
 
@@ -101,20 +92,17 @@ params = []
 params.extend(W_in)
 params.extend([b_in])
 params.extend([W_hid])
+params.extend([W_out])   
+params.extend([b_out])   
 
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
                         sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
-                        outputs_info=h_init,
-                        non_sequences=params)
-params.extend([W_out])   
-params.extend([b_out])                        
-y,updates = theano.scan(purelin,
-                        sequences=h_tmp,
-                        non_sequences=params)
+                        outputs_info=h_init)
+                     
+y,updates = theano.scan(purelin,  sequences=h_tmp)
 y = T.flatten(y)                    
-                        
                         
 cost = ((y_out-y)**2).sum()
 
@@ -145,17 +133,26 @@ for epochs_index in xrange(n_epochs) :
         f_update(lr_v)
         print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err)
 
-x_train_end = train_data[-n_input:] 
-n_predict = 200
+x_train_end = copy.deepcopy(train_data[-n_input:]) 
+
+n_predict = 100
 y_predict = numpy.zeros((n_predict,))
+cumulative_error = 0
+cumulative_error_list = numpy.zeros((n_predict,))
 for i in numpy.arange(n_predict):
     y_predict[i] = sim_fn(x_train_end)
     x_train_end[:-1] = x_train_end[1:]
     x_train_end[-1] = y_predict[i]
+    cumulative_error += numpy.abs(y_predict[i] - test_data[i])
+    cumulative_error_list[i] = cumulative_error
+plt.figure(3)
+plt.plot(numpy.arange(n_predict), cumulative_error_list)
+plt.title('cumulative error')
+plt.grid(True)
 
 plt.figure(1)
 plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
-plt.plot(numpy.arange(test_data.shape[0]), test_data,'g')
+plt.plot(numpy.arange(300), test_data[:300],'g')
 
 y_sim = sim_fn(data_x[:-1])  # 整体的单步误差
 print 'y_sim.shape: ', y_sim.shape

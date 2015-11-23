@@ -7,7 +7,6 @@ import theano.tensor as T
 import time
 import sys
 import matplotlib.pyplot as plt
-from collections import OrderedDict
 import copy
 
 import utilities.datagenerator as DG
@@ -70,9 +69,9 @@ def lstm_layer(n_input, n_LSTM, x):
 
 # 设置网络参数
 n_input = 7
-n_hidden = 5
+n_hidden = 15
 n_output = 1
-n_epochs = 20
+n_epochs = 3
 
 dtype=theano.config.floatX
 
@@ -112,7 +111,6 @@ params.extend([W_hid])
 params.extend([W_out])   
 params.extend([b_out])  
 
-
 h_tmp = lstm_layer(n_input, n_hidden, x)  
   
 pred = T.dot(h_tmp, W_out) + b_out
@@ -123,19 +121,16 @@ f_pred = theano.function([x], pred, name='f_pred')
 
 cost = ((pred - y)**2).sum()
 
-batch_size = 400    # 设置的足够大时，等价于GD
+batch_size = 2    # 设置的足够大时，等价于GD
+
 print 'Batch Size: ', batch_size 
 
-grads = theano.tensor.grad(cost, wrt=params)
-tparams = OrderedDict()
-for p in params:
-    tparams[p.name] = p   
 
-lr_v = 0.0001
-lr_ada = theano.tensor.scalar(name='lr_ada')
+update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, pred, batch_size, y)
 
-updates_1, updates_2, f_grad_shared, f_update = DG.PublicFunction.adadelta(lr_ada, tparams, grads, [x, y], cost)
-
+f_train = theano.function([x, y], cost, updates=update_W,
+                                name='EKF_f_train',
+                                mode=compile_mode)
 
 sim_fn = theano.function([x],outputs=pred)  
 start_time = time.clock() 
@@ -147,8 +142,7 @@ for epochs_index in xrange(n_epochs) :
     for batch_index, train_index in kf:
         sub_seq = train_data[train_index] 
         _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
-        train_err = f_grad_shared(_x, _y)
-        f_update(lr_v)
+        train_err = f_train(_x, _y)
         print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err)
 
 x_train_end = copy.deepcopy(train_data[-n_input:]) 

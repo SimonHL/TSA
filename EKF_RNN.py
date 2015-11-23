@@ -10,6 +10,7 @@ import theano
 import theano.tensor as T
 import matplotlib.pyplot as plt
 from collections import OrderedDict
+import copy
 
 import utilities.datagenerator as DG
 reload(DG)
@@ -25,12 +26,7 @@ def step(*args):
     #global n_input, n_hidden 
     print args
     x =  [args[u] for u in xrange(n_input)] 
-    hid_taps = args[n_input]  
-    
-    W_in =  [args[u] for u in xrange(n_input + 1, n_input * 2 + 1)]
-    b_in = args[n_input * 2 + 1]
-    W_hid = args[n_input * 2 + 2]
-    
+    hid_taps = args[n_input]    
     
     h = T.dot(x[0], W_in[0])
     for j in xrange(1, n_input):           # 前向部分
@@ -44,11 +40,6 @@ def step(*args):
 def purelin(*args):
     print args
     h = args[0]
-    W_in =  [args[u] for u in xrange(1, n_input + 1)]
-    b_in = args[n_input + 1]
-    W_hid = args[n_input + 2]
-    W_out = args[n_input + 3]
-    b_out = args[n_input + 4]
 
     y = T.dot(h,W_out) + b_out
     return y #T.tanh(y)
@@ -85,7 +76,6 @@ lr = T.scalar()     # 学习速率，标量
 
 H = T.matrix()      # 隐单元的初始化值
     
-
 h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
 
 W_in = [theano.shared(numpy.random.uniform(size=(1, n_hidden), low= -0.01, high=0.01).astype(dtype), 
@@ -96,23 +86,20 @@ W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, n_hidden), low= -0.01
 
 W_out = theano.shared(numpy.random.uniform(size=(n_hidden,n_output),low=-0.01,high=0.01).astype(dtype),name="W_out")
 b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
-
 params = []
 params.extend(W_in)
 params.extend([b_in])
 params.extend([W_hid])
+params.extend([W_out])   
+params.extend([b_out])   
 
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
                         sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
-                        outputs_info=dict(initial = H, taps=output_taps),
-                        non_sequences=params)
-params.extend([W_out])
-params.extend([b_out])                        
-y,updates = theano.scan(purelin,
-                        sequences=h_tmp,
-                        non_sequences=params)
+                        outputs_info=dict(initial = H, taps=output_taps))
+                       
+y,updates = theano.scan(purelin, sequences=h_tmp)
 y = T.flatten(y)
 
 batch_size = 2    # 设置的足够大时，等价于GD
@@ -124,13 +111,9 @@ update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, y, batch_size,
 f_train = theano.function([x_in, y_out], cost, updates=update_W,
                                 name='EKF_f_train',
                                 mode=compile_mode,
-                                givens=[(H, h_init)],
-                                on_unused_input='warn')
-
-                                                    
+                                givens=[(H, h_init)])                                              
 
 sim_fn = theano.function([x_in], outputs=y, givens=[(H, h_init)])
-
     
 start_time = time.clock()     
 
@@ -142,8 +125,9 @@ for epochs_index in xrange(n_epochs) :
         sub_seq = train_data[train_index] 
         _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
         train_err = f_train(_x, _y)
-        print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err) 
-x_train_end = train_data[-n_input:] 
+        print '{}.{}: cost={}'.format(epochs_index, batch_index, train_err)
+
+x_train_end = copy.deepcopy(train_data[-n_input:]) 
 
 n_predict = 100
 y_predict = numpy.zeros((n_predict,))
