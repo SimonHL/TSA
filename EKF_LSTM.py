@@ -16,7 +16,8 @@ compile_mode = 'FAST_COMPILE'
 # compile_mode = 'FAST_RUN'
 
 # Set the random number generators' seeds for consistency
-SEED = 100
+# SEED = int(numpy.random.lognormal()*100)
+SEED = 123
 numpy.random.seed(SEED)
 
 def lstm_layer(n_input, n_LSTM, x):
@@ -66,12 +67,18 @@ def lstm_layer(n_input, n_LSTM, x):
                                 outputs_info=[out_h, out_c])
     return rval[0]   # 对外只有h
 
+build_method = 5  # 0: LSTM
+init_method = 0   # 0: normal   1: uniform
 
 # 设置网络参数
 n_input = 7
 n_hidden = 15
 n_output = 1
-n_epochs = 3
+n_epochs = 5
+
+saveto = 'MaskRNN_b{}_i{}_h{}_nh{}_S{}.npz'.format(
+          build_method, init_method, n_hidden, 0, SEED) 
+print 'Result will be saved to: ', saveto
 
 dtype=theano.config.floatX
 
@@ -97,7 +104,9 @@ y = T.vector()  # 输出向量, 第1维是时间
 
 
 W_in = [theano.shared(numpy.random.uniform(size=(1, 4*n_hidden), low= -0.01, high=0.01).astype(dtype), 
-                        name='W_in' + str(u)) for u in range(n_input)]                
+                        name='W_in' + str(u)) for u in range(n_input)]
+b_in_value = numpy.zeros((4 * n_hidden,), dtype=dtype)
+b_in_value[1*n_hidden : 2*n_hidden] = 5  # large forget gate                
 b_in = theano.shared(numpy.zeros((4 * n_hidden,), dtype=dtype), name="b_in")
 
 W_hid = theano.shared(numpy.random.uniform(size=(n_hidden, 4*n_hidden), low= -0.01, high=0.01).astype(dtype), name='W_hid') 
@@ -147,7 +156,7 @@ for epochs_index in xrange(n_epochs) :
 
 x_train_end = copy.deepcopy(train_data[-n_input:]) 
 
-n_predict = 100
+n_predict = 150
 y_predict = numpy.zeros((n_predict,))
 cumulative_error = 0
 cumulative_error_list = numpy.zeros((n_predict,))
@@ -175,6 +184,8 @@ plt.plot(range(data_y.shape[0]-y_sim.shape[0], data_y.shape[0]), y_sim, 'r')
 plt.plot(range(data_y.shape[0]-y_sim.shape[0], data_y.shape[0]), y_sim - data_y[n_input:], 'g')
                           
 print >> sys.stderr, ('overall time (%.5fs)' % ((time.clock() - start_time) / 1.))
+
+numpy.savez(saveto, cumulative_error=cumulative_error_list)
 
 plt.show() 
        

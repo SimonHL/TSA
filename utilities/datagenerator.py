@@ -128,7 +128,6 @@ class PublicFunction(object):
         params.extend([y_hat])
         params.extend(W)
         def _step(*args):
-            print 'step args: ', args
             i = args[0]
             y_hat = args[1]
             params = args[2:]

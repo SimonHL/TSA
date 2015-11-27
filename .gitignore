@@ -7,6 +7,8 @@ Desktop.ini
 
 # python compiled file
 *.pyc
+*.npz
+*.npy
 
 # Recycle Bin used on file shares
 $RECYCLE.BIN/

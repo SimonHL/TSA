@@ -20,15 +20,14 @@ compile_mode = 'FAST_COMPILE'
 
 # Set the random number generators' seeds for consistency
 SEED = int(numpy.random.lognormal()*100)
-SEED = 99
+# SEED = 999
 numpy.random.seed(SEED)
 
 def step(*args):
     #global n_input, n_hidden 
     print args
     x =  [args[u] for u in xrange(n_input)] 
-    x_drive = args[n_input]
-    hid_taps = args[n_input+1]    
+    hid_taps = args[n_input]    
     
     h = T.dot(x[0], W_in[0])
     for j in xrange(1, n_input):           # 前向部分
@@ -36,10 +35,6 @@ def step(*args):
     
     h += T.dot(hid_taps, W_hid)            # 回归部分
     h += b_in                              # 偏置部分
-
-    g_update = T.nnet.sigmoid(b_ug + x_drive) # update gate
-
-    h = g_update * h +  (1 - g_update) * hid_taps 
   
     return T.tanh(h)
     
@@ -49,14 +44,6 @@ def purelin(*args):
 
     y = T.dot(h,W_out) + b_out
     return y #T.tanh(y)
-
-def  gen_drive_sin(sampleNum,N):
-    '''
-    生成一个长度为sampleNum, 周期为N的正弦信号
-    '''
-    data = 1.0 * numpy.sin(2 * numpy.pi / N  * numpy.arange(sampleNum))
-    return data
-
 
 
 def prepare_data(data_x, data_mask, data_y):
@@ -90,7 +77,7 @@ def prepare_data(data_x, data_mask, data_y):
 '''
 主程序
 '''
-build_method = 5  # 0: RNN
+build_method = 1  # 0: RNN
 init_method = 0   # 0: normal   1: uniform
 
 
@@ -111,16 +98,12 @@ theano.config.exception_verbosity = 'low'
 # 加要处理的数据
 g = DG.Generator()
 data_x,data_y = g.get_data('mackey_glass')
-drive_data = gen_drive_sin(data_y.shape[0], n_hidden)
-
-train_data, valid_data, test_data = prepare_data(data_x, drive_data, data_y) # data_x 会成为列向量
-
+train_data, valid_data, test_data = prepare_data(data_x, [], data_y) # data_x 会成为列向量
 print 'train_data.shape: ', train_data.shape
 print 'test_data.shape: ', test_data.shape
 
 # 构造网络
 x_in = T.vector()   # 输入向量,第1维是时间
-x_drive = T.vector() # 周期驱动信号
 y_out = T.vector()  # 输出向量
 lr = T.scalar()     # 学习速率，标量
 
@@ -149,20 +132,18 @@ else:
     W_out = theano.shared(numpy.random.uniform(size=(n_hidden,n_output),
                           low=-0.01,high=0.01).astype(dtype),name="W_out")
     b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
-b_ug = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_ug')
 params = []
 params.extend(W_in)
 params.extend([b_in])
 params.extend([W_hid])
 params.extend([W_out])   
-params.extend([b_out]) 
-params.extend([b_ug])  
+params.extend([b_out])   
 
 start_compile_time = time.clock()  
 input_taps = range(1-n_input, 1)
 output_taps = [-1]
 h_tmp, updates = theano.scan(step,  # 计算BPTT的函数
-                        sequences=[dict(input=x_in, taps=input_taps), x_drive],  # 从输出值中延时-1抽取
+                        sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
                         outputs_info=dict(initial = H, taps=output_taps))
                        
 y,updates = theano.scan(purelin, sequences=h_tmp)
@@ -174,13 +155,13 @@ print 'Batch Size: ', batch_size
 
 update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, y, batch_size, y_out)
 
-f_train = theano.function([x_in, x_drive, y_out], cost, updates=update_W,
+f_train = theano.function([x_in, y_out], [cost, h_tmp[-batch_size]], updates=update_W,
                                 name='EKF_f_train',
                                 mode=compile_mode,
                                 givens=[(H, h_init)])                                              
 
-sim_fn = theano.function([x_in, x_drive], outputs=y, givens=[(H, h_init)])
-pred_cost = theano.function([x_in, x_drive, y_out], outputs=cost, givens=[(H, h_init)]) 
+sim_fn = theano.function([x_in], outputs=y, givens=[(H, h_init)])
+pred_cost = theano.function([x_in, y_out], outputs=cost, givens=[(H, h_init)]) 
     
 ######################################
 # train
@@ -199,15 +180,16 @@ for epochs_index in xrange(n_epochs) :
     kf = DG.DataPrepare.get_seq_minibatches_idx(train_data.shape[0], batch_size, n_input, shuffle=False)
 
     for batch_index, train_index in kf:
-        sub_seq = train_data[train_index,-1] 
+        sub_seq = train_data[train_index,1] 
         _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
-        _d = train_data[train_index[n_input:],1]
-        train_err = f_train(_x,_d,_y)
+        train_err, h_init_continue = f_train(_x, _y)
+        h_init.set_value(h_init_continue + numpy.random.normal(size=(1,n_hidden), loc=0, scale=1))
+        # h_init.set_value(numpy.random.normal(size=(1,n_hidden), loc=0, scale=1))
         print '{}.{}: train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
     if numpy.mod(epochs_index+1, valid_fre) == 0: 
-        test_err = pred_cost(test_data[:-1,0], test_data[n_input:,1], test_data[n_input:,-1])   
-        valid_err = pred_cost(valid_data[:-1,0], valid_data[n_input:,1],valid_data[n_input:,-1]) 
+        test_err = pred_cost(test_data[:-1,0], test_data[n_input:,1])   
+        valid_err = pred_cost(valid_data[:-1,0], valid_data[n_input:,1]) 
         
         print '{}: train error={:.6f}, valid error={:.6f}, test error={:.6f}'.format(
             epochs_index, float(train_err), float(valid_err), float(test_err))
@@ -229,12 +211,11 @@ n_predict = 150
 y_predict = numpy.zeros((n_predict,))
 cumulative_error = 0
 cumulative_error_list = numpy.zeros((n_predict,))
-
 for i in numpy.arange(n_predict):
-    y_predict[i] = sim_fn(x_train_end, test_data[i:i+1,1])
+    y_predict[i] = sim_fn(x_train_end)
     x_train_end[:-1] = x_train_end[1:]
     x_train_end[-1] = y_predict[i]
-    cumulative_error += numpy.abs(y_predict[i] - test_data[i,-1])
+    cumulative_error += numpy.abs(y_predict[i] - test_data[i,1])
     cumulative_error_list[i] = cumulative_error
 plt.figure(3)
 plt.plot(numpy.arange(n_predict), cumulative_error_list)
@@ -243,9 +224,9 @@ plt.grid(True)
 
 plt.figure(4)
 plt.plot(numpy.arange(y_predict.shape[0]), y_predict,'r')
-plt.plot(numpy.arange(test_data.shape[0]), test_data[:,-1],'g')
+plt.plot(numpy.arange(test_data.shape[0]), test_data[:,1],'g')
 
-y_sim = sim_fn(data_x[:-1,0], drive_data[n_input:,0])  # 整体的单步误差
+y_sim = sim_fn(data_x[:-1,0])  # 整体的单步误差
 print 'y_sim.shape: ', y_sim.shape
 
 plt.figure(1)
@@ -270,10 +251,8 @@ plt.plot( history_errs[:history_errs_cur_index,2], 'b')
 
 numpy.savez(saveto, cumulative_error=cumulative_error_list)
 
-print b_ug.get_value()
-
-# plt.show() 
+# plt.show()
                           
 print 'compile time (%.5fs), run time (%.5fs)' % ((time.clock() - start_compile_time) / 1., (time.clock() - start_time) / 1.)
-       
+        
 print "finished!"

@@ -20,7 +20,7 @@ compile_mode = 'FAST_COMPILE'
 
 # Set the random number generators' seeds for consistency
 SEED = int(numpy.random.lognormal()*100)
-SEED = 99
+# SEED = 999
 numpy.random.seed(SEED)
 
 def step(*args):
@@ -90,7 +90,7 @@ def prepare_data(data_x, data_mask, data_y):
 '''
 主程序
 '''
-build_method = 5  # 0: RNN
+build_method = 3  # 0: RNN
 init_method = 0   # 0: normal   1: uniform
 
 
@@ -174,7 +174,7 @@ print 'Batch Size: ', batch_size
 
 update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, y, batch_size, y_out)
 
-f_train = theano.function([x_in, x_drive, y_out], cost, updates=update_W,
+f_train = theano.function([x_in, x_drive, y_out], [cost, h_tmp[-batch_size]], updates=update_W,
                                 name='EKF_f_train',
                                 mode=compile_mode,
                                 givens=[(H, h_init)])                                              
@@ -202,7 +202,9 @@ for epochs_index in xrange(n_epochs) :
         sub_seq = train_data[train_index,-1] 
         _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, n_input)
         _d = train_data[train_index[n_input:],1]
-        train_err = f_train(_x,_d,_y)
+        train_err, h_init_continue = f_train(_x,_d,_y)
+        h_init.set_value(h_init_continue + numpy.random.normal(size=(1,n_hidden), loc=0, scale=1))
+        # h_init.set_value(numpy.random.normal(size=(1,n_hidden), loc=0, scale=0.5))
         print '{}.{}: train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
     if numpy.mod(epochs_index+1, valid_fre) == 0: 

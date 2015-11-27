@@ -20,7 +20,7 @@ compile_mode = 'FAST_COMPILE'
 
 # Set the random number generators' seeds for consistency
 SEED = int(numpy.random.lognormal()*100)
-SEED = 99
+SEED = 999
 numpy.random.seed(SEED)
 
 def step(*args):
