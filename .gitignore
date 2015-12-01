@@ -2,6 +2,9 @@
 Thumbs.db
 ehthumbs.db
 
+# 数据绘图临时程序
+plot_data_tmp.py
+
 # Folder config file
 Desktop.ini
 
