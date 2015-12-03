@@ -25,7 +25,6 @@ class RNN(object):
                  build_method=0, # 0: RNN
                  init_method=0,  # 0: normal   1: uniform
                  n_input=7,n_hidden=5,n_output=1,
-                 n_epochs=1,
                  batch_size=1,
                  continue_train=False):
 
@@ -33,7 +32,6 @@ class RNN(object):
         self.n_input = n_input
         self.n_hidden = n_hidden
         self.n_output = n_output
-        self.n_epochs = n_epochs
 
         self.batch_size = batch_size
 
@@ -46,7 +44,6 @@ class RNN(object):
         self.build_method = build_method
         self.init_method = init_method
 
-        self.history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
         self.patience = 100
         self.valid_fre = 1
 
@@ -82,6 +79,7 @@ class RNN(object):
 
         self.b_in.set_value( numpy.zeros((self.n_hidden,), dtype=dtype))
         self.W_hid.set_value(numpy.random.normal(size=(self.n_hidden, self.n_hidden), loc=mu, scale=sigma))
+        # self.W_hid.set_value(numpy.eye(self.n_hidden))
         self.W_out.set_value(numpy.random.normal(size=(self.n_hidden, self.n_output),  loc=mu, scale=sigma))
         self.b_out.set_value(numpy.zeros((self.n_output,), dtype=dtype))
 
@@ -169,13 +167,8 @@ class RNN(object):
 
         print 'build time (%.5fs)' % ((time.clock() - start_time) / 1.)
 
-    def train(self, SEED):
+    def train(self, SEED, n_epochs, noise):
         
-        self.saveto = 'MaskRNN_b{}_i{}_h{}_nh{}_S{}.npz'.format(
-                   self.build_method, self.init_method, self.n_hidden, 0, SEED)
-
-        print 'Result will be saved to: ',self.saveto
-
         # 初始化参数
         self.set_init_parameters(SEED)
 
@@ -187,18 +180,27 @@ class RNN(object):
         print 'train info:', train_data.shape
         print 'valid info:', valid_data.shape
         print 'test info:', test_data.shape
+        self.history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
         history_errs_cur_index= 0
         bad_counter = 0
         start_time = time.clock()   
-        for epochs_index in xrange(self.n_epochs) :  
+        mu_noise, sigma_noise = 0, noise
+        self.saveto = 'MaskRNN_b{}_i{}_h{}_nh{}_S{}._p{}.npz'.format(
+                   self.build_method, self.init_method, self.n_hidden, sigma_noise, SEED,n_epochs)
+
+        print 'Result will be saved to: ',self.saveto
+        print "noise level:", mu_noise, sigma_noise 
+        for epochs_index in xrange(n_epochs) :  
             kf = DG.DataPrepare.get_seq_minibatches_idx(train_data.shape[0], self.batch_size, self.n_input, shuffle=False)
             for batch_index, train_index in kf:
                 sub_seq = train_data[train_index,1] 
                 _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, self.n_input)
-                train_err, h_init_continue = self.f_train(_x, _y)
+                train_err, h_init_continue = self.f_train(_x, _y)                
                 if self.continue_train:
-                    self.h_init.set_value(h_init_continue + numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=1))
+                    self.h_init.set_value(h_init_continue + numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise))
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
+                else:
+                    self.h_init.set_value(h_init_continue)
                 print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
             if numpy.mod(epochs_index+1, self.valid_fre) == 0:
@@ -325,9 +327,8 @@ if __name__ == '__main__':
         if o in ("-n", "--epochs"):  
             n_epochs = int(a) 
 
-    rnn = RNN( n_input=n_input, n_hidden=n_hidden, n_output=n_output, 
-             n_epochs=n_epochs, continue_train = continue_train)
+    rnn = RNN( n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train = continue_train)
     rnn.build_model()
-    rnn.train(SEED)
+    rnn.train(SEED, n_epochs,0.5)
     if b_plot:
         rnn.plot_data()
