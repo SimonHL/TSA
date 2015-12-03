@@ -9,30 +9,33 @@ reload(EKF_RNN)
 reload(IDRNN_EKF)
 
 n_input=7
-n_hidden=15
+n_hidden=5
 n_output=1
-n_epochs=40
+n_epochs=50
+noise = 2
 
-rnn =    EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output, n_epochs=n_epochs)
-rnn_c =  EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output, n_epochs=n_epochs, continue_train=True)
-id_rnn = IDRNN_EKF.IDRNN(  n_input=n_input, n_hidden=n_hidden, n_output=n_output, n_epochs=n_epochs)
-id_rnn_c = IDRNN_EKF.IDRNN(n_input=n_input, n_hidden=n_hidden, n_output=n_output, n_epochs=n_epochs, continue_train=True)
+rnn =    EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+rnn_c =  EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train=True)
+id_rnn = IDRNN_EKF.IDRNN(  n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+id_rnn_c = IDRNN_EKF.IDRNN(n_input=n_input, n_hidden=n_hidden, n_output=n_output,continue_train=True)
 
 models = []
-models.append(rnn)
+# models.append(rnn)
 models.append(rnn_c)
-models.append(id_rnn)
+# models.append(id_rnn)
 models.append(id_rnn_c)
 
 for m in models:
     m.build_model()
 
-for i in xrange(50):
-    SEED = int(numpy.random.lognormal()*100)
+for i in xrange(20):
+    numpy.random.seed()
+    # SEED = int(numpy.random.randint(1000))
+    SEED = i
     print 'Batch', i ,'begin!'
 
     for m in models:
-        m.train(SEED)
+        m.train(SEED,n_epochs, noise)
 
     print 'Batch', i ,'finished!'
 print 'END!'
