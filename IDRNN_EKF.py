@@ -83,7 +83,7 @@ class IDRNN(object):
         # self.W_hid.set_value(numpy.eye(self.n_hidden))
         self.W_out.set_value(numpy.random.normal(size=(self.n_hidden, self.n_output),  loc=mu, scale=sigma))
         self.b_out.set_value(numpy.zeros((self.n_output,), dtype=dtype))
-        self.b_ug.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*5) 
+        self.b_ug.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*1) 
 
         print self.W_out.get_value()
     def step(self, *args):
