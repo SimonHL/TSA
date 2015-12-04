@@ -95,11 +95,13 @@ class RNN(object):
         
         h += T.dot(hid_taps, self.W_hid)            # 回归部分
         h += self.b_in                              # 偏置部分
-        h = T.tanh(h)
-
-        y = T.dot(h,self.W_out) + self.b_out        # 线性输出
-        return h, y
+      
+        return T.tanh(h)
    
+    def purelin(self, *args):
+        h = args[0]
+        y = T.dot(h,self.W_out) + self.b_out
+        return y #T.tanh(y)
 
     def prepare_data(self, data_x, data_mask, data_y):
         '''
@@ -140,10 +142,11 @@ class RNN(object):
         start_time = time.clock()  
         input_taps = range(1-self.n_input, 1)
         output_taps = [-1]
-        [h_tmp,y], _ = theano.scan(self.step,  # 计算BPTT的函数
+        h_tmp, updates = theano.scan(self.step,  # 计算BPTT的函数
                                 sequences=dict(input=x_in, taps=input_taps),  # 从输出值中延时-1抽取
-                                outputs_info=[dict(initial = H, taps=output_taps), None])
+                                outputs_info=dict(initial = H, taps=output_taps))
                                
+        y,updates = theano.scan(self.purelin, sequences=h_tmp)
         y = T.flatten(y)
         
         params = []
@@ -301,9 +304,9 @@ if __name__ == '__main__':
     
     SEED = 111
     n_input=7
-    n_hidden=5
+    n_hidden=15
     n_output=1
-    n_epochs=2
+    n_epochs=20
 
     b_plot = False
     continue_train = False
