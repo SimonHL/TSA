@@ -102,12 +102,10 @@ class IDRNN(object):
 
         h = g_update * h +  (1 - g_update) * hid_taps 
   
-        return T.tanh(h)
+        h = T.tanh(h)
     
-    def purelin(self, *args):
-        h = args[0]
-        y = T.dot(h,self.W_out) + self.b_out
-        return y #T.tanh(y)
+        y = T.dot(h,self.W_out) + self.b_out        # 线性输出
+        return h, y
 
     def  gen_drive_sin(self,sampleNum,N):
         '''
@@ -178,11 +176,10 @@ class IDRNN(object):
         start_time = time.clock()  
         input_taps = range(1-self.n_input, 1)
         output_taps = [-1]
-        h_tmp, updates = theano.scan(self.step,  # 计算BPTT的函数
+        [h_tmp,y], _ = theano.scan(self.step,  # 计算BPTT的函数
                                 sequences=[dict(input=x_in, taps=input_taps), x_drive],  # 从输出值中延时-1抽取
-                                outputs_info=dict(initial = H, taps=output_taps))
+                                outputs_info=[dict(initial = H, taps=output_taps), None])
                                
-        y,updates = theano.scan(self.purelin, sequences=h_tmp)
         y = T.flatten(y)
         
         params = []
@@ -346,9 +343,9 @@ if __name__ == '__main__':
     
     SEED = 111
     n_input=7
-    n_hidden=15
+    n_hidden=5
     n_output=1
-    n_epochs=20
+    n_epochs=2
 
     b_plot = False
     continue_train = False
