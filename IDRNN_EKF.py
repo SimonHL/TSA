@@ -98,7 +98,7 @@ class IDRNN(object):
         h += T.dot(hid_taps, self.W_hid)            # 回归部分
         h += self.b_in                              # 偏置部分
 
-        g_update = T.nnet.sigmoid(self.b_ug + x_drive) # update gate
+        g_update = x_drive # update gate
 
         h = g_update * h +  (1 - g_update) * hid_taps 
   
@@ -113,6 +113,28 @@ class IDRNN(object):
         '''
         data = 1.0 * numpy.sin(2 * numpy.pi / N  * numpy.arange(sampleNum))
         return data
+    def  gen_random_mask(sampleNum,N):
+        '''
+        生成掩码序列
+        sampleNum: 序列的长度
+        N 隐单元的数目
+        '''
+        data_mask = numpy.zeros((sampleNum,N), dtype=numpy.bool)
+
+        random_e = numpy.random.exponential(scale=0.5, size=(sampleNum,))
+
+        for t in xrange(sampleNum):
+        #     i = numpy.floor(random_e[t])
+        #     if i >= n_segment_h:
+        #         i = n_segment_h-1
+
+        #     data_mask[t,0:i] = 1
+
+            for e in xrange(n_segment_h):
+                if t % 2**e == 0:
+                    data_mask[t,e] = 1
+            
+        return data_mask
 
     def prepare_data(self, data_x, data_mask, data_y):
         '''
@@ -145,7 +167,7 @@ class IDRNN(object):
     def build_model(self):
         # 构造网络
         x_in = T.vector()   # 输入向量,第1维是时间
-        x_drive = T.vector() # 周期驱动信号
+        x_drive = T.matrix() # 周期驱动信号
         y_out = T.vector()  # 输出向量
         lr = T.scalar()     # 学习速率，标量
 

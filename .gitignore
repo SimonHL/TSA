@@ -12,6 +12,7 @@ Desktop.ini
 *.pyc
 *.npz
 *.npy
+*_copy.*
 
 # Recycle Bin used on file shares
 $RECYCLE.BIN/
