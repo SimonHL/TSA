@@ -28,7 +28,7 @@ models.append(id_rnn_c)
 for m in models:
     m.build_model()
 
-for i in xrange(2):
+for i in xrange(2,20):
     numpy.random.seed()
     # SEED = int(numpy.random.randint(1000))
     SEED = i
