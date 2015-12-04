@@ -98,7 +98,7 @@ class IDRNN(object):
         h += T.dot(hid_taps, self.W_hid)            # 回归部分
         h += self.b_in                              # 偏置部分
 
-        g_update = T.nnet.sigmoid(self.b_ug + x_drive) # update gate
+        g_update = T.nnet.sigmoid(self.b_ug + x[0]) # update gate
 
         h = g_update * h +  (1 - g_update) * hid_taps 
   
@@ -323,7 +323,7 @@ if __name__ == '__main__':
     n_input=7
     n_hidden=5
     n_output=1
-    n_epochs=2
+    n_epochs=20
 
     b_plot = False
     continue_train = False
@@ -346,6 +346,6 @@ if __name__ == '__main__':
 
     rnn = IDRNN( n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train = continue_train)
     rnn.build_model()
-    rnn.train(SEED, n_epochs,0.5)
+    rnn.train(SEED, n_epochs,2)
     if b_plot:
         rnn.plot_data()

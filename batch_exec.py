@@ -9,7 +9,7 @@ reload(EKF_RNN)
 reload(IDRNN_EKF)
 
 n_input=7
-n_hidden=5
+n_hidden=7
 n_output=1
 n_epochs=50
 noise = 2
@@ -28,7 +28,7 @@ models.append(id_rnn_c)
 for m in models:
     m.build_model()
 
-for i in xrange(20):
+for i in xrange(2):
     numpy.random.seed()
     # SEED = int(numpy.random.randint(1000))
     SEED = i
