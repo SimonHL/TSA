@@ -8,11 +8,11 @@ import numpy
 reload(EKF_RNN)
 reload(IDRNN_EKF)
 
-n_input=7
-n_hidden=7
+n_input=10
+n_hidden=5
 n_output=1
-n_epochs=50
-noise = 2
+n_epochs=20
+noise = 0.5
 
 rnn =    EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output)
 rnn_c =  EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train=True)
@@ -28,7 +28,7 @@ models.append(id_rnn_c)
 for m in models:
     m.build_model()
 
-for i in xrange(2,20):
+for i in xrange(10):
     numpy.random.seed()
     # SEED = int(numpy.random.randint(1000))
     SEED = i

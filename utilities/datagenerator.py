@@ -177,7 +177,7 @@ class PublicFunction(object):
 
         cost = T.dot(a, a.T)
 
-        return update_W, P, cost
+        return update_W, P, Qw, Qv, cost
 
 class DataPrepare(object):
     @staticmethod

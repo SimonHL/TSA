@@ -83,8 +83,11 @@ class RNN(object):
         self.W_out.set_value(numpy.random.normal(size=(self.n_hidden, self.n_output),  loc=mu, scale=sigma))
         self.b_out.set_value(numpy.zeros((self.n_output,), dtype=dtype))
 
-        print self.W_out.get_value()
+        self.h_init.set_value(numpy.zeros((1,self.n_hidden), dtype=dtype))
 
+        self.P.set_value(numpy.eye(self.P.get_value().shape[0]) * numpy.asarray(10.0, dtype=dtype))
+        self.Qw.set_value(numpy.eye(self.Qw.get_value().shape[0])* numpy.asarray(10.0, dtype=dtype))
+        self.Qv.set_value(numpy.eye(self.Qv.get_value().shape[0])* numpy.asarray(0.01, dtype=dtype))
     def step(self, *args):
         x =  [args[u] for u in xrange(self.n_input)] 
         hid_taps = args[self.n_input]    
@@ -152,7 +155,7 @@ class RNN(object):
         params.extend([self.W_hid])
         params.extend([self.W_out])   
         params.extend([self.b_out]) 
-        update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
+        update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
 
         self.f_train = theano.function([x_in, y_out], [cost, h_tmp[-self.batch_size]], updates=update_W,
                                         name='EKF_f_train',
@@ -165,10 +168,6 @@ class RNN(object):
         print 'build time (%.5fs)' % ((time.clock() - start_time) / 1.)
 
     def train(self, SEED, n_epochs, noise):
-        
-        # 初始化参数
-        self.set_init_parameters(SEED)
-
         # 加要处理的数据
         g = DG.Generator()
         data_x,data_y = g.get_data('mackey_glass')
@@ -187,6 +186,10 @@ class RNN(object):
 
         print 'Result will be saved to: ',self.saveto
         print "noise level:", mu_noise, sigma_noise 
+
+        # 初始化参数
+        self.set_init_parameters(SEED)
+
         for epochs_index in xrange(n_epochs) :  
             kf = DG.DataPrepare.get_seq_minibatches_idx(train_data.shape[0], self.batch_size, self.n_input, shuffle=False)
             for batch_index, train_index in kf:
@@ -194,7 +197,8 @@ class RNN(object):
                 _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, self.n_input)
                 train_err, h_init_continue = self.f_train(_x, _y)                
                 if self.continue_train:
-                    self.h_init.set_value(h_init_continue + numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise))
+                    add_noise = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
+                    self.h_init.set_value(h_init_continue + add_noise)
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
                 else:
                     self.h_init.set_value(h_init_continue)
@@ -219,6 +223,7 @@ class RNN(object):
                     if bad_counter > self.patience:
                         print 'Early Stop!'
                         break
+
         self.history_errs = self.history_errs[:history_errs_cur_index,:]
 
         # 计算多步误差
@@ -299,11 +304,12 @@ if __name__ == '__main__':
         print 'parameter Error! '
         sys.exit() 
     
-    SEED = 111
-    n_input=7
+    SEED = 8
+    n_input=10
     n_hidden=5
     n_output=1
-    n_epochs=2
+    n_epochs=20
+    noise = 0.5
 
     b_plot = False
     continue_train = False
@@ -326,6 +332,6 @@ if __name__ == '__main__':
 
     rnn = RNN( n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train = continue_train)
     rnn.build_model()
-    rnn.train(SEED, n_epochs,0.5)
+    rnn.train(SEED, n_epochs,noise)
     if b_plot:
         rnn.plot_data()

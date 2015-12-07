@@ -46,7 +46,7 @@ class IDRNN(object):
 
         self.patience = 100
         self.valid_fre = 1
-
+        
         self.h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
 
         mu,sigma = 0.0, 0.1
@@ -71,6 +71,7 @@ class IDRNN(object):
                                   low=-0.01,high=0.01).astype(dtype),name="W_out")
             self.b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
         self.b_ug = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_ug') 
+        self.b_rg = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_rg') 
      
     def set_init_parameters(self, SEED):
         numpy.random.seed(SEED)
@@ -83,9 +84,18 @@ class IDRNN(object):
         # self.W_hid.set_value(numpy.eye(self.n_hidden))
         self.W_out.set_value(numpy.random.normal(size=(self.n_hidden, self.n_output),  loc=mu, scale=sigma))
         self.b_out.set_value(numpy.zeros((self.n_output,), dtype=dtype))
-        self.b_ug.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*1) 
 
-        print self.W_out.get_value()
+        # self.b_ug.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*0) 
+        # self.b_rg.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*0) 
+        self.b_ug.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma)) 
+        self.b_rg.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma)) 
+
+        self.h_init.set_value(numpy.zeros((1,self.n_hidden), dtype=dtype))
+
+        self.P.set_value(numpy.eye(self.P.get_value().shape[0]) * numpy.asarray(10.0, dtype=dtype))
+        self.Qw.set_value(numpy.eye(self.Qw.get_value().shape[0])* numpy.asarray(10.0, dtype=dtype))
+        self.Qv.set_value(numpy.eye(self.Qv.get_value().shape[0])* numpy.asarray(0.01, dtype=dtype))
+
     def step(self, *args):
         x =  [args[u] for u in xrange(self.n_input)] 
         x_drive = args[self.n_input]
@@ -95,11 +105,13 @@ class IDRNN(object):
         for j in xrange(1, self.n_input):           # 前向部分
             h +=  T.dot(x[j], self.W_in[j])
         
-        h += T.dot(hid_taps, self.W_hid)            # 回归部分
-        h += self.b_in                              # 偏置部分
-
+        g_reset = T.nnet.sigmoid(self.b_rg + x[0])  # reset gate
         g_update = T.nnet.sigmoid(self.b_ug + x[0]) # update gate
 
+        h += g_reset * T.dot(hid_taps, self.W_hid)   # 回归部分
+        h += self.b_in                               # 偏置部分
+        
+        
         h = g_update * h +  (1 - g_update) * hid_taps 
   
         h = T.tanh(h)
@@ -167,7 +179,8 @@ class IDRNN(object):
         params.extend([self.W_out])   
         params.extend([self.b_out]) 
         params.extend([self.b_ug])
-        update_W, P, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
+        params.extend([self.b_rg])
+        update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
 
         self.f_train = theano.function([x_in, x_drive, y_out], [cost, h_tmp[-self.batch_size]], updates=update_W,
                                         name='EKF_f_train',
@@ -180,9 +193,6 @@ class IDRNN(object):
         print 'build time (%.5fs)' % ((time.clock() - start_time) / 1.)
 
     def train(self, SEED, n_epochs,noise):
-        
-        # 初始化参数
-        self.set_init_parameters(SEED)
         # 加要处理的数据
         g = DG.Generator()
         data_x,data_y = g.get_data('mackey_glass')
@@ -201,9 +211,12 @@ class IDRNN(object):
         mu_noise, sigma_noise = 0, noise
         self.saveto = 'MaskRNN_b{}_i{}_h{}_nh{}_S{}._p{}.npz'.format(
                    self.build_method, self.init_method, self.n_hidden, sigma_noise, SEED,n_epochs)
-
         print 'Result will be saved to: ',self.saveto
-        print "noise level:", mu_noise, sigma_noise 
+        print "noise level:", mu_noise, sigma_noise
+
+        # 初始化参数
+        self.set_init_parameters(SEED)
+
         for epochs_index in xrange(n_epochs) :  
             kf = DG.DataPrepare.get_seq_minibatches_idx(train_data.shape[0], self.batch_size, self.n_input, shuffle=False)
             for batch_index, train_index in kf:
@@ -212,7 +225,8 @@ class IDRNN(object):
                 _d = train_data[train_index[self.n_input:],1]
                 train_err, h_init_continue = self.f_train(_x,_d,_y)
                 if self.continue_train:
-                    self.h_init.set_value(h_init_continue + numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise))
+                    add_noise = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
+                    self.h_init.set_value(h_init_continue + add_noise)
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
                 else:
                     self.h_init.set_value(h_init_continue)
@@ -257,7 +271,6 @@ class IDRNN(object):
         y_sim = self.sim_fn(data_x[:-1,0], drive_data[self.n_input:,0])
         print 'y_sim.shape: ', y_sim.shape
 
-
         # 保存结果
         numpy.savez(self.saveto, cumulative_error=cumulative_error_list,
             history_errs = self.history_errs)
@@ -277,6 +290,7 @@ class IDRNN(object):
         
         print 'gate value:'
         print self.b_ug.get_value()
+        print self.b_rg.get_value()
         print 'train time (%.5fs)' % ((time.clock() - start_time) / 1.)
 
     def plot_data(self):
@@ -319,11 +333,12 @@ if __name__ == '__main__':
         print 'parameter Error! '
         sys.exit() 
     
-    SEED = 111
-    n_input=7
+    SEED = 6
+    n_input=10
     n_hidden=5
     n_output=1
     n_epochs=20
+    noise = 1
 
     b_plot = False
     continue_train = False
@@ -346,6 +361,6 @@ if __name__ == '__main__':
 
     rnn = IDRNN( n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train = continue_train)
     rnn.build_model()
-    rnn.train(SEED, n_epochs,2)
+    rnn.train(SEED, n_epochs,noise)
     if b_plot:
         rnn.plot_data()

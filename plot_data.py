@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 files = os.listdir(os.getcwd())
 # files = ['MaskRNN_b1_i0_h25_nh0_S80.npz'] 
 
-b_plot_single = False
+b_plot_single = True
 
 matched_num = numpy.zeros((6))
 matched_err_sum = {}
@@ -18,7 +18,7 @@ for file_name in files:
     if i == -1:
         continue
     if b_plot_single:
-        seed_number = file_name.find('0.') 
+        seed_number = file_name.find('9._') 
         if seed_number == -1:
             continue
     npzfile = numpy.load(file_name)
