@@ -9,15 +9,15 @@ reload(EKF_RNN)
 reload(IDRNN_EKF)
 
 n_input=10
-n_hidden=5
+n_hidden=7
 n_output=1
-n_epochs=20
-noise = 0.5
+n_epochs=5
+noise = 3
 
-rnn =    EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output)
+rnn =    EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output, batch_size=2)
 rnn_c =  EKF_RNN.RNN(      n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train=True)
-id_rnn = IDRNN_EKF.IDRNN(  n_input=n_input, n_hidden=n_hidden, n_output=n_output)
-id_rnn_c = IDRNN_EKF.IDRNN(n_input=n_input, n_hidden=n_hidden, n_output=n_output,continue_train=True)
+id_rnn = IDRNN_EKF.IDRNN(  n_input=n_input, n_hidden=n_hidden, n_output=n_output, batch_size=2)
+id_rnn_c = IDRNN_EKF.IDRNN(n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train=True)
 
 models = []
 # models.append(rnn)

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 files = os.listdir(os.getcwd())
 # files = ['MaskRNN_b1_i0_h25_nh0_S80.npz'] 
 
-b_plot_single = True
+b_plot_single = False
 
 matched_num = numpy.zeros((6))
 matched_err_sum = {}

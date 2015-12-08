@@ -32,8 +32,7 @@ class IDRNN(object):
         self.n_input = n_input
         self.n_hidden = n_hidden
         self.n_output = n_output
-
-        self.batch_size = batch_size
+        
 
         self.n_predict = 150
 
@@ -41,9 +40,11 @@ class IDRNN(object):
 
         if continue_train:
             build_method=3
+        else:
+            batch_size = 1
         self.build_method = build_method
         self.init_method = init_method
-
+        self.batch_size = batch_size 
         self.patience = 100
         self.valid_fre = 1
         
@@ -225,11 +226,12 @@ class IDRNN(object):
                 _d = train_data[train_index[self.n_input:],1]
                 train_err, h_init_continue = self.f_train(_x,_d,_y)
                 if self.continue_train:
+                    # sigma_noise = numpy.sqrt(self.Qw.get_value()[0,0])
                     add_noise = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
                     self.h_init.set_value(h_init_continue + add_noise)
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
-                else:
-                    self.h_init.set_value(h_init_continue)
+                # else:
+                #     self.h_init.set_value(h_init_continue)
                 print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
             if numpy.mod(epochs_index+1, self.valid_fre) == 0:
@@ -333,12 +335,12 @@ if __name__ == '__main__':
         print 'parameter Error! '
         sys.exit() 
     
-    SEED = 6
+    SEED = 8
     n_input=10
-    n_hidden=5
+    n_hidden=7
     n_output=1
     n_epochs=20
-    noise = 1
+    noise = 0.5
 
     b_plot = False
     continue_train = False

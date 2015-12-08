@@ -149,10 +149,12 @@ class PublicFunction(object):
         a = y - y_hat # 单步预测误差
 
         # 计算增益矩阵
-        G = T.dot(T.dot(P,B.T), T.nlinalg.matrix_inverse(T.dot(T.dot(B,P),B.T)+Qv)) 
+        G = T.dot(T.dot(P,B.T), T.nlinalg.matrix_inverse(T.dot(T.dot(B,P),B.T)+Qv))
+
+        delta_W_vec =  T.dot(a,G.T) #(T.dot(G, a)).T
 
         # 计算新的状态
-        update_W_vec = W_vec  +  T.dot(a,G.T) #(T.dot(G, a)).T
+        update_W_vec = W_vec  + delta_W_vec
 
         # 计算新的状态协方差阵
         delta_P = -T.dot(T.dot(G,B), P) + Qw 
@@ -171,7 +173,9 @@ class PublicFunction(object):
 
         update_W.extend(update_P)
 
-        update_Qw = [(Qw,  1.0 * Qw)]
+        # update_Qw = [(Qw,  1.0 * Qw)]
+
+        update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * T.max(delta_W_vec)**2 )]
 
         update_W.extend(update_Qw)
 
