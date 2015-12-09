@@ -46,7 +46,7 @@ class IDRNN(object):
         self.init_method = init_method
         self.batch_size = batch_size 
         self.patience = 100
-        self.valid_fre = 1
+        self.valid_fre = 20
         
         self.h_init = theano.shared(numpy.zeros((1,n_hidden), dtype=dtype), name='h_init') # 网络隐层初始值
 
@@ -74,7 +74,7 @@ class IDRNN(object):
         self.b_ug = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_ug') 
         self.b_rg = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_rg') 
      
-    def set_init_parameters(self, SEED):
+    def set_init_parameters(self, SEED, P0, Qw0):
         numpy.random.seed(SEED)
         mu,sigma = 0.0, 0.1
         for i in self.W_in:
@@ -93,8 +93,8 @@ class IDRNN(object):
 
         self.h_init.set_value(numpy.zeros((1,self.n_hidden), dtype=dtype))
 
-        self.P.set_value(numpy.eye(self.P.get_value().shape[0]) * numpy.asarray(10.0, dtype=dtype))
-        self.Qw.set_value(numpy.eye(self.Qw.get_value().shape[0])* numpy.asarray(10.0, dtype=dtype))
+        self.P.set_value(numpy.eye(self.P.get_value().shape[0]) * numpy.asarray(P0, dtype=dtype))
+        self.Qw.set_value(numpy.eye(self.Qw.get_value().shape[0])* numpy.asarray(Qw0, dtype=dtype))
         self.Qv.set_value(numpy.eye(self.Qv.get_value().shape[0])* numpy.asarray(0.01, dtype=dtype))
 
     def step(self, *args):
@@ -193,7 +193,7 @@ class IDRNN(object):
             
         print 'build time (%.5fs)' % ((time.clock() - start_time) / 1.)
 
-    def train(self, SEED, n_epochs,noise):
+    def train(self, SEED, n_epochs, noise, P0, Qw0):
         # 加要处理的数据
         g = DG.Generator()
         data_x,data_y = g.get_data('mackey_glass')
@@ -204,7 +204,7 @@ class IDRNN(object):
         print 'train info:', train_data.shape
         print 'valid info:', valid_data.shape
         print 'test info:', test_data.shape
-        self.history_errs = numpy.zeros((n_epochs,3), dtype=dtype)  
+        self.history_errs = numpy.zeros((n_epochs*train_data.shape[0],3), dtype=dtype)  
         history_errs_cur_index= 0
         bad_counter = 0
 
@@ -216,7 +216,7 @@ class IDRNN(object):
         print "noise level:", mu_noise, sigma_noise
 
         # 初始化参数
-        self.set_init_parameters(SEED)
+        self.set_init_parameters(SEED, P0, Qw0)
 
         for epochs_index in xrange(n_epochs) :  
             kf = DG.DataPrepare.get_seq_minibatches_idx(train_data.shape[0], self.batch_size, self.n_input, shuffle=False)
@@ -232,27 +232,27 @@ class IDRNN(object):
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
                 # else:
                 #     self.h_init.set_value(h_init_continue)
-                print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
+                # print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
-            if numpy.mod(epochs_index+1, self.valid_fre) == 0:
-                train_err = self.pred_cost(train_data[:-1,0], train_data[self.n_input:,1], train_data[self.n_input:,-1]) / train_data.shape[0]
-                test_err  = self.pred_cost(test_data[:-1,0],   test_data[self.n_input:,1], test_data[ self.n_input:,-1])   / test_data.shape[0]
-                valid_err = self.pred_cost(valid_data[:-1,0], valid_data[self.n_input:,1], valid_data[self.n_input:,-1]) / valid_data.shape[0]
-                
-                print '{}: train error={:.6f}, valid error={:.6f}, test error={:.6f}'.format(
-                    epochs_index, float(train_err), float(valid_err), float(test_err))
+                if numpy.mod(batch_index+1, self.valid_fre) == 0:
+                    train_err = self.pred_cost(train_data[:-1,0], train_data[self.n_input:,1], train_data[self.n_input:,-1]) / train_data.shape[0]
+                    test_err  = self.pred_cost(test_data[:-1,0],   test_data[self.n_input:,1], test_data[ self.n_input:,-1])   / test_data.shape[0]
+                    valid_err = self.pred_cost(valid_data[:-1,0], valid_data[self.n_input:,1], valid_data[self.n_input:,-1]) / valid_data.shape[0]
+                    
+                    print '{}: train error={:.6f}, valid error={:.6f}, test error={:.6f}'.format(
+                        epochs_index, float(train_err), float(valid_err), float(test_err))
 
-                self.history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
-                history_errs_cur_index += 1
+                    self.history_errs[history_errs_cur_index,:] = [train_err, valid_err, test_err]
+                    history_errs_cur_index += 1
 
-                if valid_err <= self.history_errs[:history_errs_cur_index,1].min():
-                    bad_counter = 0
+                    if valid_err <= self.history_errs[:history_errs_cur_index,1].min():
+                        bad_counter = 0
 
-                if history_errs_cur_index > self.patience and valid_err >= self.history_errs[:history_errs_cur_index-self.patience,1].min():
-                    bad_counter += 1
-                    if bad_counter > self.patience:
-                        print 'Early Stop!'
-                        break
+                    if history_errs_cur_index > self.patience and valid_err >= self.history_errs[:history_errs_cur_index-self.patience,1].min():
+                        bad_counter += 1
+                        if bad_counter > self.patience * train_data.shape[0]:
+                            print 'Early Stop!'
+                            break
         self.history_errs = self.history_errs[:history_errs_cur_index,:]
 
         # 计算多步误差
@@ -339,8 +339,10 @@ if __name__ == '__main__':
     n_input=10
     n_hidden=7
     n_output=1
-    n_epochs=20
+    n_epochs=10
     noise = 0.5
+    P0 = 10
+    Qw0 = 10
 
     b_plot = False
     continue_train = False
@@ -363,6 +365,6 @@ if __name__ == '__main__':
 
     rnn = IDRNN( n_input=n_input, n_hidden=n_hidden, n_output=n_output, continue_train = continue_train)
     rnn.build_model()
-    rnn.train(SEED, n_epochs,noise)
+    rnn.train(SEED, n_epochs,noise,P0,Qw0)
     if b_plot:
         rnn.plot_data()

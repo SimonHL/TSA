@@ -175,7 +175,11 @@ class PublicFunction(object):
 
         # update_Qw = [(Qw,  1.0 * Qw)]
 
-        update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * T.max(delta_W_vec)**2 )]
+        # update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * T.max(delta_W_vec)**2 )]
+
+        update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * delta_W_vec**2 )]
+
+        # update_Qw =  [(Qw,  0.95*Qw + 0.05*T.nlinalg.diag(P.diagonal()))]
 
         update_W.extend(update_Qw)
 
