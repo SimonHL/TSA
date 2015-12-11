@@ -104,6 +104,12 @@ class RNN(object):
         y = T.dot(h,self.W_out) + self.b_out        # 线性输出
         return h, y
    
+    def  gen_drive_sin(self,sampleNum,N):
+        '''
+        生成一个长度为sampleNum, 周期为N的正弦信号
+        '''
+        data = 1.0 * numpy.sin(2 * numpy.pi / N  * numpy.arange(sampleNum))
+        return data
 
     def prepare_data(self, data_x, data_mask, data_y):
         '''
@@ -172,6 +178,18 @@ class RNN(object):
         # 加要处理的数据
         g = DG.Generator()
         data_x,data_y = g.get_data('mackey_glass')
+        # data_x,data_y = g.get_data('sea_clutter_lo')
+        print data_x.shape
+        noise_begin = int(data_x.shape[0] * 0.65)
+        noise_end = int(data_x.shape[0] * 0.7)
+        data_x[noise_begin:noise_end] += 0.1*self.gen_drive_sin(noise_end-noise_begin,10)
+        normal_noise = numpy.random.normal(size=data_x.shape, loc=0, scale=0.02)
+        # data_x += normal_noise
+        plt.figure(123)
+        plt.plot(normal_noise,'r')
+        plt.plot(data_x,'b')
+
+        data_y = data_x
         train_data, valid_data, test_data = self.prepare_data(data_x, [], data_y) # data_x 会成为列向量
 
         print 'train info:', train_data.shape
@@ -198,11 +216,12 @@ class RNN(object):
                 _x, _y = DG.PublicFunction.data_get_data_x_y(sub_seq, self.n_input)
                 train_err, h_init_continue = self.f_train(_x, _y)                
                 if self.continue_train:
-                    add_noise = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
-                    self.h_init.set_value(h_init_continue + add_noise)
+                    # sigma_noise = numpy.sqrt(numpy.max(self.Qw.get_value()))
+                    noise_add = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
+                    self.h_init.set_value(h_init_continue + noise_add)
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
-                # else:
-                #     self.h_init.set_value(h_init_continue)
+                else:
+                    self.h_init.set_value(h_init_continue)
                 # print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
                 if numpy.mod(batch_index+1, self.valid_fre) == 0:
@@ -273,7 +292,7 @@ class RNN(object):
 
         plt.figure(2)
         plt.plot(numpy.arange(self.y_predict.shape[0]), self.y_predict,'r')
-        plt.plot(numpy.arange(self.test_data.shape[0]), self.test_data[:,-1],'g')
+        plt.plot(numpy.arange(self.y_predict.shape[0]), self.test_data[:self.y_predict.shape[0],-1],'g')
 
         plt.figure(3)
         index_start = self.data_x.shape[0]-self.y_sim.shape[0]

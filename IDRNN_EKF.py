@@ -73,6 +73,8 @@ class IDRNN(object):
             self.b_out = theano.shared(numpy.zeros((n_output,), dtype=dtype),name="b_out")
         self.b_ug = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_ug') 
         self.b_rg = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='b_rg') 
+        self.Win_ug = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='Win_ug') 
+        self.Win_rg = theano.shared(numpy.zeros((n_hidden,), dtype=dtype), name='Win_rg') 
      
     def set_init_parameters(self, SEED, P0, Qw0):
         numpy.random.seed(SEED)
@@ -82,14 +84,13 @@ class IDRNN(object):
 
         self.b_in.set_value( numpy.zeros((self.n_hidden,), dtype=dtype))
         self.W_hid.set_value(numpy.random.normal(size=(self.n_hidden, self.n_hidden), loc=mu, scale=sigma))
-        # self.W_hid.set_value(numpy.eye(self.n_hidden))
         self.W_out.set_value(numpy.random.normal(size=(self.n_hidden, self.n_output),  loc=mu, scale=sigma))
         self.b_out.set_value(numpy.zeros((self.n_output,), dtype=dtype))
 
-        # self.b_ug.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*0) 
-        # self.b_rg.set_value(numpy.ones((self.n_hidden,), dtype=dtype)*0) 
         self.b_ug.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma)) 
-        self.b_rg.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma)) 
+        self.b_rg.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma))
+        self.Win_ug.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma)) 
+        self.Win_rg.set_value(numpy.random.normal(size=(self.n_hidden,), loc=mu, scale=sigma))  
 
         self.h_init.set_value(numpy.zeros((1,self.n_hidden), dtype=dtype))
 
@@ -106,8 +107,8 @@ class IDRNN(object):
         for j in xrange(1, self.n_input):           # 前向部分
             h +=  T.dot(x[j], self.W_in[j])
         
-        g_reset = T.nnet.sigmoid(self.b_rg + x[0])  # reset gate
-        g_update = T.nnet.sigmoid(self.b_ug + x[0]) # update gate
+        g_reset = T.nnet.sigmoid(self.b_rg + x[0] * self.Win_rg)  # reset gate
+        g_update = T.nnet.sigmoid(self.b_ug + x[0] * self.Win_ug) # update gate
 
         h += g_reset * T.dot(hid_taps, self.W_hid)   # 回归部分
         h += self.b_in                               # 偏置部分
@@ -181,6 +182,9 @@ class IDRNN(object):
         params.extend([self.b_out]) 
         params.extend([self.b_ug])
         params.extend([self.b_rg])
+        params.extend([self.Win_ug])
+        params.extend([self.Win_rg])
+
         update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
 
         self.f_train = theano.function([x_in, x_drive, y_out], [cost, h_tmp[-self.batch_size]], updates=update_W,
@@ -197,7 +201,20 @@ class IDRNN(object):
         # 加要处理的数据
         g = DG.Generator()
         data_x,data_y = g.get_data('mackey_glass')
+        # data_x,data_y = g.get_data('sea_clutter_lo')
+        print data_x.shape
         drive_data = self.gen_drive_sin(data_y.shape[0], self.n_hidden)
+        
+        noise_begin = int(data_x.shape[0] * 0.65)
+        noise_end = int(data_x.shape[0] * 0.7)
+        data_x[noise_begin:noise_end] += 0.1*self.gen_drive_sin(noise_end-noise_begin,10)
+        normal_noise = numpy.random.normal(size=data_x.shape, loc=0, scale=0.02)
+        # data_x += normal_noise
+        plt.figure(123)
+        plt.plot(normal_noise,'r')
+        plt.plot(data_x,'b')
+
+        data_y = data_x
 
         train_data, valid_data, test_data = self.prepare_data(data_x, drive_data, data_y) # data_x 会成为列向量
 
@@ -226,12 +243,12 @@ class IDRNN(object):
                 _d = train_data[train_index[self.n_input:],1]
                 train_err, h_init_continue = self.f_train(_x,_d,_y)
                 if self.continue_train:
-                    # sigma_noise = numpy.sqrt(self.Qw.get_value()[0,0])
-                    add_noise = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
-                    self.h_init.set_value(h_init_continue + add_noise)
+                    sigma_noise = numpy.sqrt(numpy.max(self.Qw.get_value()))
+                    noise_add = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
+                    self.h_init.set_value(h_init_continue + noise_add)
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
-                # else:
-                #     self.h_init.set_value(h_init_continue)
+                else:
+                    self.h_init.set_value(h_init_continue)
                 # print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
                 if numpy.mod(batch_index+1, self.valid_fre) == 0:
@@ -303,7 +320,7 @@ class IDRNN(object):
 
         plt.figure(2)
         plt.plot(numpy.arange(self.y_predict.shape[0]), self.y_predict,'r')
-        plt.plot(numpy.arange(self.test_data.shape[0]), self.test_data[:,-1],'g')
+        plt.plot(numpy.arange(self.y_predict.shape[0]), self.test_data[:self.y_predict.shape[0],-1],'g')
 
         plt.figure(3)
         index_start = self.data_x.shape[0]-self.y_sim.shape[0]

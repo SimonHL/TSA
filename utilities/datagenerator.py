@@ -227,11 +227,13 @@ class Generator(object):
         1:self.data_dynamic_gen_1,
         2:self.data_dynamic_gen_2,
         3:self.data_gen_y_sin,
-        'mackey_glass':self.data_mackey_glass
+        'mackey_glass':self.data_mackey_glass,
+        'sea_clutter_hi':self.get_sea_clutter_hi,
+        'sea_clutter_lo':self.get_sea_clutter_lo
         }
 
     def load_data(self):
-        data = numpy.genfromtxt("mytestdata.txt")
+        data = numpy.genfromtxt("./data/mytestdata.txt")
         data_x = data[:,0]
         data_y = data[:,1]
         return data_x, data_y
@@ -322,17 +324,33 @@ class Generator(object):
 
         x = x[resample_index]
         return x, x
+    def read_complex_signal(self, file_name):
+        data = numpy.genfromtxt(file_name)
+        x = [data[i,0] for i in xrange(0,2000)] 
+        x = numpy.array(x)
+        x_min = numpy.min(x)
+        x_max = numpy.max(x)
+        x = (x - x_min) / (x_max -x_min)
+        return x
+
+    def get_sea_clutter_hi(self):
+        file_name = './data/hi.dat'
+        x = self.read_complex_signal(file_name)
+        return x,x
+    def get_sea_clutter_lo(self):
+        file_name = './data/lo.dat'
+        x = self.read_complex_signal(file_name)
+        return x,x
 
     def get_data(self,data_type):
         return self.data_generator.get(data_type)()
-
 
 def main():
     '''
     模块测试代码
     '''
     data = Generator()
-    x,y = data.get_data('mackey_glass')
+    x,y = data.get_data('sea_clutter_hi')
     
     plt.subplot(211)
     plt.plot(numpy.arange(x.shape[0]), x, 'g')
@@ -349,5 +367,5 @@ def test_data_prepare():
 
 
 if __name__ == '__main__':
-    #main()
-    test_data_prepare()
+    main()
+    # test_data_prepare()
