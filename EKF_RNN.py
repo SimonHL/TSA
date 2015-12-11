@@ -220,8 +220,8 @@ class RNN(object):
                     noise_add = numpy.random.normal(size=(1,self.n_hidden), loc=mu_noise, scale=sigma_noise)
                     self.h_init.set_value(h_init_continue + noise_add)
                     # self.h_init.set_value(numpy.random.normal(size=(1,self.n_hidden), loc=0, scale=0.5))
-                else:
-                    self.h_init.set_value(h_init_continue)
+                # else:
+                #     self.h_init.set_value(h_init_continue)
                 # print '{}.{}: online train error={:.6f}'.format(epochs_index, batch_index, float(train_err))
 
                 if numpy.mod(batch_index+1, self.valid_fre) == 0:

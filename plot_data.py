@@ -46,7 +46,7 @@ for (k,v) in matched_err_sum.items():
 
 plt.figure(2)     
 for (k,v) in history_err_sum.items():
-    data = v[6:,1] / matched_num[k]  # average valid_err
+    data = v[15:,1] / matched_num[k]  # average valid_err
     plt.plot(numpy.arange(data.shape[0]), data, colors[k])
     plt.grid(True)
 

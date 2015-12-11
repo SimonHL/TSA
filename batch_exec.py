@@ -23,9 +23,9 @@ id_rnn_c = IDRNN_EKF.IDRNN(n_input=n_input, n_hidden=n_hidden, n_output=n_output
 
 models = []
 models.append(rnn)
-models.append(rnn_c)
+# models.append(rnn_c)
 models.append(id_rnn)
-models.append(id_rnn_c)
+# models.append(id_rnn_c)
 
 for m in models:
     m.build_model()
