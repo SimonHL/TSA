@@ -326,7 +326,8 @@ class Generator(object):
         return x, x
     def read_complex_signal(self, file_name):
         data = numpy.genfromtxt(file_name)
-        x = [data[i,0] for i in xrange(0,2000)] 
+        tau = 1
+        x = [data[i,0] for i in xrange(1000*tau,4000*tau,tau)] 
         x = numpy.array(x)
         x_min = numpy.min(x)
         x_max = numpy.max(x)

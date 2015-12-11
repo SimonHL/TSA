@@ -200,8 +200,8 @@ class IDRNN(object):
     def train(self, SEED, n_epochs, noise, P0, Qw0):
         # 加要处理的数据
         g = DG.Generator()
-        data_x,data_y = g.get_data('mackey_glass')
-        # data_x,data_y = g.get_data('sea_clutter_lo')
+        # data_x,data_y = g.get_data('mackey_glass')
+        data_x,data_y = g.get_data('sea_clutter_lo')
         print data_x.shape
         drive_data = self.gen_drive_sin(data_y.shape[0], self.n_hidden)
         
@@ -353,11 +353,11 @@ if __name__ == '__main__':
         sys.exit() 
     
     SEED = 8
-    n_input=10
-    n_hidden=7
+    n_input=6
+    n_hidden=12
     n_output=1
-    n_epochs=10
-    noise = 0.5
+    n_epochs=5
+    noise = 1
     P0 = 10
     Qw0 = 10
 
