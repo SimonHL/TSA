@@ -40,8 +40,6 @@ class RNN(object):
 
         if continue_train:
             build_method = 1
-        else:
-            batch_size = 1
         self.build_method = build_method
         self.init_method = init_method
         self.batch_size = batch_size 
@@ -162,7 +160,12 @@ class RNN(object):
         params.extend([self.W_hid])
         params.extend([self.W_out])   
         params.extend([self.b_out]) 
-        update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
+
+        if self.continue_train:
+            ada_method = 1
+        else:
+            ada_method = 0
+        update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out, ada_method)
 
         self.f_train = theano.function([x_in, y_out], [cost, h_tmp[-self.batch_size]], updates=update_W,
                                         name='EKF_f_train',
@@ -324,12 +327,12 @@ if __name__ == '__main__':
         print 'parameter Error! '
         sys.exit() 
     
-    SEED = 8
+    SEED = 29
     n_input=10
     n_hidden=7
     n_output=1
-    n_epochs=10
-    noise = 0.5
+    n_epochs=5
+    noise = 1
     P0 = 10
     Qw0 = 10
 

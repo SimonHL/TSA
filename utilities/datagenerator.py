@@ -93,7 +93,7 @@ class PublicFunction(object):
         return updates_1, updates_2,f_grad_shared, f_update 
 
     @staticmethod
-    def extend_kalman_train(W, y_hat, dim_y_hat, y):
+    def extend_kalman_train(W, y_hat, dim_y_hat, y,ada_method=0):
         '''
         P: 状态对应的协方差矩阵
         Qv: 观测噪声的协方差矩阵
@@ -173,12 +173,11 @@ class PublicFunction(object):
 
         update_W.extend(update_P)
 
-        # update_Qw = [(Qw,  1.0 * Qw)]
-
         # update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * T.max(delta_W_vec)**2 )]
-
-        update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * delta_W_vec**2 )]
-
+        if ada_method == 1:
+            update_Qw = [(Qw,  0.95*Qw + 0.05*T.eye(dim_Wv) * delta_W_vec**2 )]
+        else: 
+            update_Qw = [(Qw,  1.0 * Qw)]
         # update_Qw =  [(Qw,  0.95*Qw + 0.05*T.nlinalg.diag(P.diagonal()))]
 
         update_W.extend(update_Qw)

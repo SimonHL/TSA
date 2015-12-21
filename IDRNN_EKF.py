@@ -40,8 +40,6 @@ class IDRNN(object):
 
         if continue_train:
             build_method=3
-        else:
-            batch_size = 1
         self.build_method = build_method
         self.init_method = init_method
         self.batch_size = batch_size 
@@ -184,8 +182,12 @@ class IDRNN(object):
         params.extend([self.b_rg])
         params.extend([self.Win_ug])
         params.extend([self.Win_rg])
-
-        update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out)
+        
+        if self.continue_train:
+            ada_method = 1
+        else:
+            ada_method = 0
+        update_W, self.P, self.Qw, self.Qv, cost = DG.PublicFunction.extend_kalman_train(params, y, self.batch_size, y_out,ada_method)
 
         self.f_train = theano.function([x_in, x_drive, y_out], [cost, h_tmp[-self.batch_size]], updates=update_W,
                                         name='EKF_f_train',
@@ -200,8 +202,8 @@ class IDRNN(object):
     def train(self, SEED, n_epochs, noise, P0, Qw0):
         # 加要处理的数据
         g = DG.Generator()
-        # data_x,data_y = g.get_data('mackey_glass')
-        data_x,data_y = g.get_data('sea_clutter_lo')
+        data_x,data_y = g.get_data('mackey_glass')
+        # data_x,data_y = g.get_data('sea_clutter_lo')
         print data_x.shape
         drive_data = self.gen_drive_sin(data_y.shape[0], self.n_hidden)
         
@@ -209,7 +211,7 @@ class IDRNN(object):
         noise_end = int(data_x.shape[0] * 0.7)
         data_x[noise_begin:noise_end] += 0.1*self.gen_drive_sin(noise_end-noise_begin,10)
         normal_noise = numpy.random.normal(size=data_x.shape, loc=0, scale=0.02)
-        # data_x += normal_noise
+        data_x += normal_noise
         plt.figure(123)
         plt.plot(normal_noise,'r')
         plt.plot(data_x,'b')
@@ -322,6 +324,8 @@ class IDRNN(object):
         plt.plot(numpy.arange(self.y_predict.shape[0]), self.y_predict,'r')
         plt.plot(numpy.arange(self.y_predict.shape[0]), self.test_data[:self.y_predict.shape[0],-1],'g')
 
+        numpy.savetxt('multi_predict.txt',numpy.vstack(([self.y_predict], [self.test_data[:self.y_predict.shape[0],-1]])).T)
+
         plt.figure(3)
         index_start = self.data_x.shape[0]-self.y_sim.shape[0]
         index_train_end = self.train_data.shape[0]
@@ -330,6 +334,8 @@ class IDRNN(object):
         train_index = numpy.arange(index_train_end-index_start)
         test_index  = numpy.arange(index_train_end-index_start,index_test_end-index_start)
         valid_index = numpy.arange(index_test_end-index_start,index_valid_end-index_start)
+
+        numpy.savetxt('single_predict.txt',numpy.vstack(([self.y_sim], [self.data_y[self.n_input:,0]])).T)
 
         plt.plot(train_index, self.y_sim[train_index],'r')
         plt.plot(test_index, self.y_sim[test_index],'y')
@@ -352,9 +358,9 @@ if __name__ == '__main__':
         print 'parameter Error! '
         sys.exit() 
     
-    SEED = 8
-    n_input=6
-    n_hidden=12
+    SEED = 39
+    n_input=10
+    n_hidden=7
     n_output=1
     n_epochs=5
     noise = 1
